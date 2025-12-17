@@ -2,8 +2,9 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
 export default defineConfig({
+  base: '/',
   plugins: [vue()],
-
+  
   // 关键：用于 Vercel + 前端路由
   build: {
     outDir: 'dist'
