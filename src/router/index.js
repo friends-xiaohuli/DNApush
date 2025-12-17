@@ -1,8 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import Home from '../views/Home.vue'
-import Page1 from '../views/Page1.vue'
-import Page2 from '../views/Page2.vue'
+import Page1 from '../views/page1.vue'
+import Page2 from '../views/page2.vue'
 
 
 const routes = [
