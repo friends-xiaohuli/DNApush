@@ -13,7 +13,7 @@
 
       <div class="status-row">
         <div class="level-badge">
-          <span class="label">当前段位</span>
+          <span class="label">当前等级</span>
           <span class="value">{{ inputLevel }}</span>
         </div>
         

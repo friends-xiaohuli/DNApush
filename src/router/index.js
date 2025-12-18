@@ -6,6 +6,7 @@ import Page2 from '../views/page2.vue'
 import Page3 from '../views/page3.vue'
 import about from '../views/about.vue'
 import ExpCalculator from '../views/ExpCalculator.vue'
+import instanceInfo from '../views/instanceInfo.vue'
 
 
 const routes = [
@@ -14,6 +15,7 @@ const routes = [
   { path: '/page2', component: Page2 },
   { path: '/page3', component: Page3 },
   { path: '/ExpCalculator', component: ExpCalculator },
+  { path: '/instanceInfo', component: instanceInfo },
   { path: '/about', component: about }
 ]
 
