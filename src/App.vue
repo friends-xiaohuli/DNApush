@@ -11,7 +11,6 @@ const bgUrl = ref(`url('https://www.loliapi.com/acg/?time=${new Date().getTime()
 <template>
   <div class="global-bg" :style="{ backgroundImage: bgUrl }"></div>
 
-  <link rel="icon" href="./assets/T_Chat_Character_01.ico" />
 
   <div class="app-container">
     <header class="main-header">
@@ -19,7 +18,9 @@ const bgUrl = ref(`url('https://www.loliapi.com/acg/?time=${new Date().getTime()
     </header>
 
     <nav class="nav-tabs">
+      <router-link to="/" class="tab-item">＋</router-link>
       <router-link to="/page1" class="tab-item">模之楔 等级计算器</router-link>
+      <router-link to="/ExpCalculator" class="tab-item">ExpCalculator</router-link>
       <router-link to="/page2" class="tab-item">api测试</router-link>
       <router-link to="/page3" class="tab-item">系统设置</router-link>
       <router-link to="/about" class="tab-item">关于我们</router-link>
@@ -117,9 +118,9 @@ const bgUrl = ref(`url('https://www.loliapi.com/acg/?time=${new Date().getTime()
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 
 /* =========================================
-   📱 移动端适配核心代码 (新增部分)
+   移动端适配
    ========================================= */
-@media (max-width: 600px) {
+@media (max-width: 800px) {
   /* 1. 容器两侧留白减小，利用更多空间 */
   .app-container {
     padding: 0 10px; 
@@ -136,7 +137,7 @@ const bgUrl = ref(`url('https://www.loliapi.com/acg/?time=${new Date().getTime()
   /* 3. 按钮样式调整 */
   .tab-item {
     padding: 12px 5px; /* 上下加高方便手指点击，左右减少防止撑开 */
-    font-size: 13px;   /* 字体稍微改小一点点 */
+    font-size: 15px;   /* 字体稍微改小一点点 */
     text-align: center;
     white-space: normal; /* 允许手机端长文字换行 (针对"模之楔...") */
     display: flex;       /* 让文字在按钮里垂直居中 */
@@ -147,6 +148,7 @@ const bgUrl = ref(`url('https://www.loliapi.com/acg/?time=${new Date().getTime()
 
   /* 4. 针对特别长的按钮做特殊处理 (可选) */
   /* 如果您希望 "系统设置" 和 "关于我们" 在一行，长标题独占一行，可以用这个 */
-  /* .tab-item:first-child { grid-column: span 2; } */
+  .tab-item:first-child { grid-column: span 2; }
+  /* .tab-item:nth-child(3) { grid-column: span 2; } */
 }
 </style>
