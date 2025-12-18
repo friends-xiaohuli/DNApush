@@ -11,7 +11,7 @@ const bgUrl = ref(`url('https://www.loliapi.com/acg/?time=${new Date().getTime()
 <template>
   <div class="global-bg" :style="{ backgroundImage: bgUrl }"></div>
 
-  <link rel="icon" href="assets/T_Chat_Character_01.ico" />
+  <link rel="icon" href="./assets/T_Chat_Character_01.ico" />
 
   <div class="app-container">
     <header class="main-header">
@@ -38,51 +38,44 @@ const bgUrl = ref(`url('https://www.loliapi.com/acg/?time=${new Date().getTime()
 </template>
 
 <style scoped>
-/* --- 新增：背景层样式 --- */
+/* --- 保持原有的背景和桌面端样式不变 --- */
 .global-bg {
-  position: fixed;   /* 固定定位，不随滚动条滚动 */
+  position: fixed;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  z-index: -1;       /* 置于最底层 */
-  
+  z-index: -1;
   background-position: center;
   background-size: cover;
   background-repeat: no-repeat;
-  
-  /* 关键：模糊效果 */
   filter: blur(15px); 
-  
-  /* 技巧：放大一点点，防止模糊后边缘出现白边 */
   transform: scale(1.1); 
 }
 
-/* --- 原有样式 (微调) --- */
 .app-container {
   max-width: 800px;
   margin: 0 auto;
   font-family: Arial, sans-serif;
   text-align: center;
-  position: relative; /* 确保层级正常 */
+  position: relative;
 }
 
 .main-header {
   margin-top: 20px;
   margin-bottom: 20px;
-  /* 为了让标题在背景上看得清，可以加一点阴影或改色 */
   color: #333; 
   text-shadow: 0 1px 3px rgba(255,255,255, 0.8);
 }
 
+/* --- 桌面端默认样式 (保持不变) --- */
 .nav-tabs {
   display: flex;
   justify-content: center;
   gap: 10px;
   margin-bottom: 20px;
-  /* 导航栏背景如果不加颜色，可能会透出背景图 */
-  background: rgba(255, 255, 255, 0.6); /* 半透明白色背景 */
-  backdrop-filter: blur(5px); /* 磨砂玻璃效果 */
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(5px);
   border-radius: 8px;
   padding: 10px;
   box-shadow: 0 2px 10px rgba(0,0,0,0.05);
@@ -95,10 +88,12 @@ const bgUrl = ref(`url('https://www.loliapi.com/acg/?time=${new Date().getTime()
   border-radius: 5px;
   transition: all 0.3s;
   font-weight: bold;
+  /* 防止文字换行导致高度不一致 */
+  white-space: nowrap; 
 }
 
 .tab-item:hover {
-  background-color: rgba(66, 184, 131, 0.2); /* 悬停颜色改淡一点 */
+  background-color: rgba(66, 184, 131, 0.2);
   color: #42b883;
 }
 
@@ -109,23 +104,49 @@ const bgUrl = ref(`url('https://www.loliapi.com/acg/?time=${new Date().getTime()
 
 .content-area {
   min-height: 500px;
-  /* 内容区域必须有背景色，否则文字直接显示在模糊图上会看不清 */
-  background: rgba(255, 255, 255, 0.85); /* 85% 不透明度的白色 */
-  backdrop-filter: blur(5px); /* 内容区也可以加一点磨砂感 */
-  border-radius: 12px; /* 圆角好看点 */
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(5px);
+  border-radius: 12px;
   border: 1px solid rgba(255,255,255,0.5);
   padding: 20px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.1); /* 浮起阴影 */
+  box-shadow: 0 8px 32px rgba(0,0,0,0.1);
 }
 
 /* 动画 */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
+.fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
+/* =========================================
+   📱 移动端适配核心代码 (新增部分)
+   ========================================= */
+@media (max-width: 600px) {
+  /* 1. 容器两侧留白减小，利用更多空间 */
+  .app-container {
+    padding: 0 10px; 
+  }
+
+  /* 2. 导航栏改为网格布局 (2列 x 2行) */
+  .nav-tabs {
+    display: grid; /* 启用网格布局 */
+    grid-template-columns: 1fr 1fr; /* 强制分为两列，每列等宽 */
+    gap: 8px; /* 间距稍微调小 */
+    padding: 8px;
+  }
+
+  /* 3. 按钮样式调整 */
+  .tab-item {
+    padding: 12px 5px; /* 上下加高方便手指点击，左右减少防止撑开 */
+    font-size: 13px;   /* 字体稍微改小一点点 */
+    text-align: center;
+    white-space: normal; /* 允许手机端长文字换行 (针对"模之楔...") */
+    display: flex;       /* 让文字在按钮里垂直居中 */
+    align-items: center;
+    justify-content: center;
+    line-height: 1.2;    /* 行高紧凑一点 */
+  }
+
+  /* 4. 针对特别长的按钮做特殊处理 (可选) */
+  /* 如果您希望 "系统设置" 和 "关于我们" 在一行，长标题独占一行，可以用这个 */
+  /* .tab-item:first-child { grid-column: span 2; } */
 }
 </style>

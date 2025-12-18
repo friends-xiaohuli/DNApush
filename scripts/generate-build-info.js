@@ -10,7 +10,7 @@ const buildTime = now.toLocaleString('zh-CN', {
 
 // 2. 准备数据
 const data = {
-  version: 'v1.0.5', 
+  version: 'v1.0.10', 
   buildTime: buildTime,
   author: '胶胶角wiki组'
 };

@@ -365,6 +365,10 @@ const handleinputExp = (e) => {
 </template>
 
 <style scoped>
+/* =========================================
+   1. 桌面端默认样式 (保持你原有的逻辑不变)
+   ========================================= */
+
 /* 容器布局 */
 .page-container {
   display: flex;
@@ -379,10 +383,9 @@ const handleinputExp = (e) => {
   max-width: 450px;
   background: #fff;
   padding: 10px;
-  border-radius: 4px; /* 模拟窗口 */
+  border-radius: 4px;
 }
 
-/* 顶部信息 */
 .header-info {
   text-align: center;
   font-size: 10px;
@@ -390,7 +393,6 @@ const handleinputExp = (e) => {
   margin-bottom: 10px;
 }
 
-/* GroupBox 模拟 */
 .group-box {
   border: 1px solid #dcdcdc;
   border-radius: 4px;
@@ -405,10 +407,10 @@ legend {
   font-weight: bold;
 }
 
-/* 输入网格 */
+/* 输入网格 (桌面: 左右排列) */
 .input-grid {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto 1fr; /* 左侧自适应，右侧撑满 */
   gap: 10px 15px;
   align-items: center;
 }
@@ -423,21 +425,23 @@ input {
   border: 1px solid #ccc;
   border-radius: 2px;
   outline: none;
+  /* 桌面端字体可以小一点 */
+  font-size: 14px; 
 }
 input:focus {
   border-color: #1565C0;
 }
 
-/* 结果列表 */
 .result-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
+/* 结果行 (桌面: 左右排列，左侧固定140px) */
 .result-row {
   display: grid;
-  grid-template-columns: 140px 1fr; /* 左侧标签固定宽度，右侧自适应 */
+  grid-template-columns: 140px 1fr; 
   align-items: center;
   gap: 10px;
 }
@@ -470,16 +474,15 @@ input:focus {
 .divider {
   height: 1px;
   background: #eee;
-  border-bottom: 1px solid #fff; /* 制造一点凹陷感 */
+  border-bottom: 1px solid #fff;
   box-shadow: 0 1px 0 #ddd inset;
   margin: 5px 0;
 }
 
-/* 合计状态样式 */
 .total-box {
   background-color: #f0f0f0;
   color: #000;
-  border-style: double; /* 模拟 Qt 的 double border */
+  border-style: double;
 }
 
 .success-bg {
@@ -494,7 +497,6 @@ input:focus {
   border-color: #d32f2f;
 }
 
-/* 底部状态栏 */
 .status-bar {
   text-align: center;
   font-style: italic;
@@ -513,5 +515,79 @@ input:focus {
   color: #d32f2f;
   font-weight: bold;
   font-style: normal;
+}
+
+/* =========================================
+   📱 2. 移动端竖屏适配 (新增核心代码)
+   ========================================= */
+@media (max-width: 600px) {
+  /* 1. 减少容器边距，争取更多空间 */
+  .page-container {
+    padding: 10px;
+  }
+  
+  .calculator-card {
+    padding: 0; /* 卡片内边距清零，由 group-box 提供间距 */
+    background: transparent; /* 手机上可以去掉卡片背景，直接融为一体 */
+  }
+
+  /* 2. GroupBox 调整 */
+  .group-box {
+    padding: 12px; /* 稍微紧凑一点 */
+    background: #fff; /* 确保内容有背景 */
+  }
+
+  /* 3. 输入区域：改为上下堆叠 */
+  .input-grid {
+    grid-template-columns: 1fr; /* 强制单列 */
+    gap: 5px; /* 减小间距 */
+  }
+
+  .input-grid label {
+    text-align: left; /* 标签改为左对齐 */
+    margin-top: 5px;
+    font-weight: bold;
+    color: #555;
+  }
+
+  input {
+    padding: 10px; /* 增大点击区域 */
+    font-size: 16px; /* 关键：iOS上字体小于16px点击时会强制放大页面，设为16px可防止 */
+  }
+
+  /* 4. 结果区域：改为上下堆叠 */
+  .result-row {
+    grid-template-columns: 1fr; /* 强制单列 */
+    gap: 4px;
+    margin-bottom: 8px; /* 增加行间距 */
+  }
+
+  .row-label {
+    text-align: left; /* 标签左对齐 */
+    font-size: 12px;
+    color: #666;
+  }
+
+  /* 5. 数值框样式优化 */
+  .row-value-box {
+    padding: 10px; /* 增加高度 */
+    display: flex; /* 使用 flex 让内部文字更好排版 */
+    justify-content: space-between; /* 数量和经验值两端对齐 (可选) */
+    align-items: center;
+  }
+
+  .sub-text {
+    font-size: 12px;
+    /* 手机上字号小一点，或者让它换行 */
+  }
+  
+  /* 6. 合计行特殊处理 */
+  .total-row {
+    margin-top: 10px;
+  }
+  .total-row .row-label {
+    font-size: 14px;
+    color: #333;
+  }
 }
 </style>
