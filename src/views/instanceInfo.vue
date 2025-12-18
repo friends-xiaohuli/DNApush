@@ -21,7 +21,7 @@
 
     <div class="global-status-bar" v-if="currentStatus">
       <svg class="info-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-      <span>数据更新于: {{ formatTime(currentStatus.updated_at) }}</span>
+      <span>数据更新于: {{ formatTime(currentStatus.updated) }}</span>
     </div>
 
     <main class="main-content">
@@ -169,16 +169,25 @@ const loadData = async (forceRefresh = false) => {
 const fetchData = async () => {
   loading.value = true;
   error.value = '';
+  
   try {
-    const [resStatus, resInfo] = await Promise.all([
-      fetch('/api_gamekee/dnaPetConfig/getCurrentData').then(r => r.json()),
-      fetch('/api_gamekee/dna/instanceInfo').then(r => r.json())
-    ]);
+    const response = await fetch('/api/gamekee');
+    const result = await response.json();
 
-    if (resStatus.code !== 0 || resInfo.code !== 0) throw new Error('接口数据异常');
+    if (!response.ok) {
+      throw new Error(result.error || '请求失败');
+    }
 
-    currentStatus.value = resStatus.data;
-    instanceGroups.value = resInfo.data;
+    const { statusResult, infoResult } = result;
+
+    if (statusResult.code !== 0 || infoResult.code !== 0) throw new Error('接口数据异常');
+
+
+    statusResult.data.updated = Math.floor(Date.now() / 1000);
+
+
+    currentStatus.value = statusResult.data;
+    instanceGroups.value = infoResult.data;
 
     const timestamp = Date.now();
     localStorage.setItem(CACHE_KEY, JSON.stringify({
@@ -187,6 +196,7 @@ const fetchData = async () => {
       instanceGroups: instanceGroups.value
     }));
     startCooldown(timestamp);
+
   } catch (err) {
     console.error(err);
     error.value = '数据更新失败';
