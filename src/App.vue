@@ -14,13 +14,13 @@ const bgUrl = ref(`url('https://www.loliapi.com/acg/?time=${new Date().getTime()
 
   <div class="app-container">
     <header class="main-header">
-      <h1>DNA tool</h1>
+      <h1>DNA咕噜咕噜</h1>
     </header>
 
     <nav class="nav-tabs">
       <router-link to="/" class="tab-item">＋</router-link>
-      <router-link to="/page1" class="tab-item">模之楔 等级计算器</router-link>
-      <router-link to="/ExpCalculator" class="tab-item">ExpCalculator</router-link>
+      <router-link to="/page1" class="tab-item">魔之楔 等级计算器</router-link>
+      <router-link to="/ExpCalculator" class="tab-item">等级Exp 差值计算器</router-link>
       <router-link to="/page2" class="tab-item">api测试</router-link>
       <router-link to="/page3" class="tab-item">系统设置</router-link>
       <router-link to="/about" class="tab-item">关于我们</router-link>

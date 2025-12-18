@@ -303,7 +303,7 @@ const handleinputExp = (e) => {
     <div class="calculator-card">
       
       <div class="header-info">
-        Version: v1.0.7 Web | Author: 胶胶角wiki组 (Ported)
+        Version: v1.0.7 Web | Author: 皎皎角wiki组 (Ported)
       </div>
 
       <fieldset class="group-box">
@@ -328,7 +328,7 @@ const handleinputExp = (e) => {
       </fieldset>
 
       <fieldset class="group-box">
-        <legend>各品质分配详情</legend>
+        <legend>各品质分配详情[推测]</legend>
         
         <div class="result-list">
           <div v-for="item in distribution" :key="item.name" class="result-row">

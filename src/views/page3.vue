@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2>分页2</h2>
+    <h2>分页3</h2>
     <button @click="sendData">请求 API</button>
   </div>
 </template>

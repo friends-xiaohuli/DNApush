@@ -10,14 +10,13 @@ const buildTime = now.toLocaleString('zh-CN', {
 
 // 2. 准备数据
 const data = {
-  version: 'v1.0.10', 
+  version: 'v1.0.12', 
   buildTime: buildTime,
-  author: '胶胶角wiki组'
+  author: '皎皎角wiki组'
 };
 
 try {
   // 3. 确定文件路径
-  // process.cwd() 获取的是你运行 npm 命令时的根目录，正好是 build-info.json 应该在的地方
   const outputPath = path.resolve(process.cwd(), 'build-info.json');
 
   // 4. 写入文件

@@ -486,12 +486,14 @@ th {
   border: 2px solid #009688;
 }
 .table-tag {
-  font-size: 0.7rem;
+  font-size: 0.7rem; 
   background: #009688;
   color: white;
-  padding: 1px 3px;
-  border-radius: 2px;
-  margin-left: 2px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+  line-height: 1;
+  display: inline-block;
 }
 
 /* JSON 工具 */
