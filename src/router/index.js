@@ -7,6 +7,7 @@ import Page3 from '../views/page3.vue'
 import about from '../views/about.vue'
 import ExpCalculator from '../views/ExpCalculator.vue'
 import instanceInfo from '../views/instanceInfo.vue'
+import role from '../views/role.vue'
 
 
 const routes = [
@@ -16,7 +17,8 @@ const routes = [
   { path: '/page3', component: Page3 },
   { path: '/ExpCalculator', component: ExpCalculator },
   { path: '/instanceInfo', component: instanceInfo },
-  { path: '/about', component: about }
+  { path: '/about', component: about },
+  { path: '/role', component: role },
 ]
 
 export default createRouter({

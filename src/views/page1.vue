@@ -1,7 +1,10 @@
 <script setup>
-import { ref, reactive, watch, computed } from 'vue'
+import { ref, reactive, watch, onMounted } from 'vue'
+// 引入数据管理工具
+// 如果路径报错，请根据你的文件结构调整，例如 ../utils/userData
+import { updateModule, getModule } from '../utils/userData';
 
-// --- 1. 核心配置 (与 Python 代码一致) ---
+// --- 1. 核心配置 ---
 const qualities = [
   { name: "白色", max: 35,  exp_per: 20,  color: "#757575" },
   { name: "绿色", max: 36,  exp_per: 40,  color: "#2E7D32" },
@@ -23,18 +26,37 @@ const resultStatus = reactive({
   totalExp: 0
 })
 
-// 用于存储每个品质的计算结果
 const distribution = ref(qualities.map(q => ({ ...q, count: 0, currentExp: 0 })))
 
-// --- 3. 算法移植 (Python -> JS) ---
+// --- 3. 数据加载与互通逻辑 ---
+onMounted(() => {
+  // 1. 优先读取自己的数据 (wedge_calc)
+  const wedgeData = getModule('wedge_calc');
+  
+  if (wedgeData) {
+    if (wedgeData.count) inputCount.value = wedgeData.count;
+    if (wedgeData.exp) inputExp.value = wedgeData.exp;
+  }
 
-// 辅助：深拷贝数组
+  // // 2. 互通逻辑：如果没有填入经验，尝试从“经验计算器”读取总经验
+  // // 这样用户在另一页算完等级后，过来可以直接算楔子分配
+  // if (!inputExp.value) {
+  //   const expData = getModule('exp_calc');
+  //   if (expData && expData.totalExp) {
+  //     inputExp.value = expData.totalExp;
+  //   }
+  // }
+
+  // 3. 如果有数据，自动触发一次计算
+  if (inputCount.value && inputExp.value) {
+    runCalculation();
+  }
+});
+
+// --- 4. 算法移植 (保持不变) ---
 const clone = (arr) => [...arr]
-
-// 辅助：随机整数 [min, max]
 const randint = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min
 
-// 辅助：洗牌算法 (Fisher-Yates)
 const shuffle = (array) => {
   for (let i = array.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -43,7 +65,6 @@ const shuffle = (array) => {
   return array
 }
 
-// 策略初始化函数
 const initGreedyBottomUp = (targetCount) => {
   const counts = new Array(qualities.length).fill(0)
   let rem = targetCount
@@ -69,20 +90,14 @@ const initGreedyTopDown = (targetCount) => {
 const initRandom = (targetCount) => {
   const counts = new Array(qualities.length).fill(0)
   let rem = targetCount
-  
   const indices = shuffle([...Array(qualities.length).keys()])
-  
   for (const i of indices) {
     const maxCanFill = Math.min(rem, qualities[i].max)
     let fill = 0
-    if (maxCanFill > 0) {
-      fill = randint(0, maxCanFill)
-    }
+    if (maxCanFill > 0) fill = randint(0, maxCanFill)
     counts[i] = fill
     rem -= fill
   }
-  
-  // 修正阶段
   if (rem > 0) {
     for (let i = 0; i < qualities.length; i++) {
       const space = qualities[i].max - counts[i]
@@ -95,44 +110,37 @@ const initRandom = (targetCount) => {
   return counts
 }
 
-// 核心优化器
 const optimizeCounts = (startCounts, targetExp) => {
   let currentCounts = [...startCounts]
   const maxSteps = 100
-  
   for (let step = 0; step < maxSteps; step++) {
     const currentExp = currentCounts.reduce((acc, c, i) => acc + c * qualities[i].exp_per, 0)
     const diff = targetExp - currentExp
-    
     if (diff === 0) return { counts: currentCounts, diff: 0 }
     
     let bestMove = null
     let bestNewDiffAbs = Math.abs(diff)
     
-    if (diff > 0) { // 缺经验：低换高 (i -> j, i < j)
+    if (diff > 0) { 
       for (let i = 0; i < qualities.length; i++) {
         if (currentCounts[i] <= 0) continue
         for (let j = i + 1; j < qualities.length; j++) {
           if (currentCounts[j] >= qualities[j].max) continue
-          
           const delta = qualities[j].exp_per - qualities[i].exp_per
           const newDiffAbs = Math.abs(diff - delta)
-          
           if (newDiffAbs < bestNewDiffAbs) {
             bestNewDiffAbs = newDiffAbs
             bestMove = [i, j]
           }
         }
       }
-    } else { // 经验多了：高换低 (i -> j, i > j)
+    } else { 
       for (let i = qualities.length - 1; i >= 0; i--) {
         if (currentCounts[i] <= 0) continue
         for (let j = 0; j < i; j++) {
           if (currentCounts[j] >= qualities[j].max) continue
-          
-          const delta = qualities[j].exp_per - qualities[i].exp_per // delta is negative
+          const delta = qualities[j].exp_per - qualities[i].exp_per 
           const newDiffAbs = Math.abs(diff - delta)
-          
           if (newDiffAbs < bestNewDiffAbs) {
             bestNewDiffAbs = newDiffAbs
             bestMove = [i, j]
@@ -140,14 +148,11 @@ const optimizeCounts = (startCounts, targetExp) => {
         }
       }
     }
-    
     if (!bestMove) break
-    
     const [src, dst] = bestMove
     currentCounts[src]--
     currentCounts[dst]++
   }
-  
   const finalExp = currentCounts.reduce((acc, c, i) => acc + c * qualities[i].exp_per, 0)
   return { counts: currentCounts, diff: targetExp - finalExp }
 }
@@ -155,21 +160,16 @@ const optimizeCounts = (startCounts, targetExp) => {
 const getExpRange = (count) => {
   const cMin = initGreedyBottomUp(count)
   const cMax = initGreedyTopDown(count)
-  
-  // 如果连基础填充都做不到（数量超标），返回 null
   if (!cMin || !cMax) return [0, 0]
-
   const expMin = cMin.reduce((acc, c, i) => acc + c * qualities[i].exp_per, 0)
   const expMax = cMax.reduce((acc, c, i) => acc + c * qualities[i].exp_per, 0)
   return [expMin, expMax]
 }
 
-// 主计算逻辑
 const runCalculation = () => {
   const tCount = parseInt(inputCount.value)
   const tExp = parseInt(inputExp.value)
   
-  // 1. 基础校验
   if (isNaN(tCount) || isNaN(tExp) || tCount <= 0 || tExp <= 0) {
     resultStatus.message = "等待输入有效数字..."
     resultStatus.success = false
@@ -197,41 +197,31 @@ const runCalculation = () => {
     return
   }
 
-  // 2. 策略执行
   let bestCounts = null
   let minDiff = Infinity
-  
   const startPoints = []
   
-  // 策略 A & B
   const p1 = initGreedyBottomUp(tCount)
   if (p1) startPoints.push(p1)
-  
   const p2 = initGreedyTopDown(tCount)
   if (p2) startPoints.push(p2)
-  
-  // 策略 C: 随机轰炸 (JS 速度很快，500次没问题)
   for (let i = 0; i < 500; i++) {
     startPoints.push(initRandom(tCount))
   }
   
-  // 3. 优化循环
   for (const counts of startPoints) {
     const { counts: optCounts, diff } = optimizeCounts(counts, tExp)
-    
     if (diff === 0) {
       bestCounts = optCounts
       minDiff = 0
-      break // 找到完美解，直接退出
+      break 
     }
-    
     if (Math.abs(diff) < Math.abs(minDiff)) {
       minDiff = diff
       bestCounts = optCounts
     }
   }
   
-  // 4. 更新 UI 数据
   if (bestCounts) {
     let sumC = 0
     let sumE = 0
@@ -247,7 +237,7 @@ const runCalculation = () => {
     
     if (minDiff === 0) {
       resultStatus.success = true
-      resultStatus.message = "完美匹配"
+      resultStatus.message = "预估完成 仅供参考"
     } else {
       resultStatus.success = false
       resultStatus.message = `无精确解 (误差 ${minDiff} exp)`
@@ -255,45 +245,38 @@ const runCalculation = () => {
   }
 }
 
-// 监听输入变化自动计算
-watch([inputCount, inputExp], runCalculation)
+// --- 5. 监听与保存逻辑 ---
+watch([inputCount, inputExp], () => {
+  // 1. 每次变化都计算
+  runCalculation();
 
-//强制范围
+  // 2. 每次变化都保存到 wedge_calc 模块
+  updateModule('wedge_calc', {
+    count: inputCount.value,
+    exp: inputExp.value
+  });
+});
+
+// --- 6. 输入处理 ---
 const handleinputCount = (e) => {
   let value = e.target.value
-  // 2. 正则替换：把所有"非数字"替换为空字符串
   value = value.replace(/[^\d]/g, '')
-  // 3. 逻辑判断：如果为空则不处理，如果有值则判断大小
   if (value !== '') {
-    // 转为数字比较
-    if (parseInt(value) > 464) {
-      value = '464' // 超过50强制设为50
-    }
-    // (可选) 移除前导零，比如用户输入 05 -> 5
+    if (parseInt(value) > 464) value = '464'
     value = String(parseInt(value))
   }
-
-  // 4. 更新数据
   inputCount.value = value
-  // 5. 强制更新输入框显示 (处理 Vue 有时 DOM 不更新的问题)
   e.target.value = value
 }
-const handleinputExp = (e) => {
 
+const handleinputExp = (e) => {
   let value = e.target.value
   value = value.replace(/[^\d]/g, '')
-  
   if (value !== '') {
-    if (parseInt(value) > 50090) {
-      value = '50090' 
-    }
+    if (parseInt(value) > 50090) value = '50090' 
     value = String(parseInt(value))
   }
-
-  // 4. 更新数据
   inputExp.value = value
-  
-
   e.target.value = value
 }
 </script>
@@ -303,26 +286,26 @@ const handleinputExp = (e) => {
     <div class="calculator-card">
       
       <div class="header-info">
-        Version: v1.0.7 Web | Author: 皎皎角wiki组 (Ported)
+        Version: v1.0.8 Web | Author: 皎皎角wiki组 (Ported)
       </div>
 
       <fieldset class="group-box">
         <legend>基础数据输入</legend>
         <div class="input-grid">
-          <label>当前魔之楔总数量:</label>
+          <label>首次获得的魔之楔数量:</label>
           <input 
             type="number" 
             :value="inputCount"
             @input="handleinputCount"
-            placeholder="目标总数"
+            placeholder="总数"
           />
           
-          <label>当前总经验:</label>
+          <label>首次获得魔之楔的总经验:</label>
           <input 
             type="number" 
             :value="inputExp"
             @input="handleinputExp"
-            placeholder="目标总经验"
+            placeholder="总经验"
           />
         </div>
       </fieldset>

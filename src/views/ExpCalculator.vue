@@ -1,29 +1,25 @@
 <template>
   <div class="container">
     <div class="result-card" :class="{ 'highlight-rank': isSpecialLevel(inputLevel) }">
-      
       <div class="target-badge">
         <div class="target-label">距离目标 <span class="target-tag">Lv.{{ inputTargetLevel }}</span> 还需经验</div>
         <div class="target-value" :class="{ 'text-green': expToTarget <= 0 }">
           {{ expToTarget <= 0 ? '已达成目标' : expToTarget.toLocaleString() }}
         </div>
       </div>
-
       <hr class="divider" />
-
       <div class="status-row">
         <div class="level-badge">
           <span class="label">当前等级</span>
           <span class="value">{{ inputLevel }}</span>
         </div>
-        
         <div class="exp-info">
           <div class="row">
             <span>当前总经验:</span>
             <strong>{{ calculatedTotalExp.toLocaleString() }}</strong>
           </div>
           <div class="row">
-            <span>距离下一级 (Lv.{{ isMaxLevel ? 'MAX' : inputLevel + 1 }}):</span>
+            <span>下级所需:</span>
             <span>{{ nextLevelDiff }}</span>
           </div>
           <div class="progress-bar-bg">
@@ -33,52 +29,103 @@
       </div>
     </div>
 
+    <div class="target-setting-bar">
+      <label class="setting-label">🎯 设定目标等级</label>
+      <div class="setting-input-wrapper">
+        <button class="adj-btn" @click="adjustTarget(-1)">-</button>
+        <input 
+          type="number" 
+          v-model.number="inputTargetLevel" 
+          @change="validateTargetLevel"
+          :min="inputLevel"
+          max="65"
+          class="target-input-field"
+        />
+        <button class="adj-btn" @click="adjustTarget(1)">+</button>
+      </div>
+    </div>
+
+    <div class="module-section">
+      <div class="module-header-tip">
+        <span class="tip-icon">💡</span>
+        <span>点击下方图标切换页面填写详细数据，返回后自动更新</span>
+      </div>
+      
+      <nav class="module-nav">
+        <template v-for="(item, key) in moduleDisplayList" :key="key">
+          <component 
+            :is="item.route ? 'router-link' : 'div'" 
+            :to="item.route"
+            class="module-item"
+            :class="{ 
+              'has-data': item.hasData, 
+              'no-data': !item.hasData && item.route,
+              'disabled': !item.route 
+            }"
+          >
+            <div class="module-icon">{{ item.icon }}</div>
+            <div class="module-name">{{ item.name }}</div>
+            
+            <div v-if="item.hasData" class="module-stats">
+              <div class="stat-exp">{{ item.exp.toLocaleString() }} exp</div>
+              <div class="stat-bar-bg">
+                <div class="stat-bar-fill" :style="{ width: item.percent + '%' }"></div>
+              </div>
+              <div class="stat-percent">{{ item.percent }}%</div>
+            </div>
+
+            <div v-else class="module-empty">
+              <span>点击录入</span>
+              <span class="plus-icon">+</span>
+            </div>
+          </component>
+        </template>
+      </nav>
+    </div>
+
     <div class="input-section">
-      <div class="input-row">
-        <div class="input-group">
-          <label>当前等级</label>
-          <input 
-            type="number" 
-            v-model.number="inputLevel" 
-            @input="handleLevelInput"
-            min="1"
-            max="65"
-            class="main-input"
-          />
-        </div>
-        
-        <div class="input-group">
-          <label>当前已有经验</label>
-          <input 
-            type="number" 
-            v-model.number="inputCurrentExp" 
-            @change="handleExpOverflow" 
-            min="0"
-            placeholder="0"
-            class="main-input"
-          />
-          <div class="input-tip" v-if="!isMaxLevel">
-            上限: {{ currentLevelData[2] }} (超过自动升级)
+      <div class="input-header" @click="toggleInput">
+        <span class="title">手动校准 (当前等级/经验)</span>
+        <span class="arrow" :class="{ rotated: isInputExpanded }">▼</span>
+      </div>
+      
+      <div v-show="isInputExpanded" class="input-body">
+        <div class="input-row">
+          <div class="input-group">
+            <label>当前等级</label>
+            <input 
+              type="number" 
+              v-model.number="inputLevel" 
+              @input="handleLevelInput"
+              min="1"
+              max="65"
+              class="main-input"
+            />
           </div>
-        </div>
-        
-        <div class="input-group target-group">
-          <label>目标等级</label>
-          <input 
-            type="number" 
-            v-model.number="inputTargetLevel" 
-            @change="validateTargetLevel"
-            :min="inputLevel"
-            max="65"
-            class="main-input target-input"
-          />
+          <div class="input-group">
+            <label>已有经验 (本级)</label>
+            <input 
+              type="number" 
+              v-model.number="inputCurrentExp" 
+              @change="handleExpOverflow" 
+              min="0"
+              placeholder="0"
+              class="main-input"
+            />
+            <div class="input-tip" v-if="!isMaxLevel">
+              上限: {{ currentLevelData[2] }} (自动升级)
+            </div>
+          </div>
         </div>
       </div>
     </div>
 
     <div class="table-section">
-      <h3>等级对照表</h3>
-      <div class="table-container">
+      <div class="table-header" @click="toggleTable">
+        <h3>等级对照表</h3>
+        <span class="arrow" :class="{ rotated: isTableExpanded }">▼</span>
+      </div>
+      <div v-show="isTableExpanded" class="table-container">
         <table>
           <thead>
             <tr>
@@ -96,6 +143,7 @@
                 'current-row': row[0] === inputLevel,
                 'target-row': row[0] === inputTargetLevel
               }"
+              :id="'row-' + row[0]" 
             >
               <td>
                 {{ row[0] }}
@@ -108,20 +156,12 @@
         </table>
       </div>
     </div>
-
-    <div class="json-tools">
-      <h3>数据备份 / JSON 接口</h3>
-      <textarea v-model="jsonString" rows="2" placeholder='{"level": 45, "exp": 1200, "target": 60}'></textarea>
-      <div class="btn-group">
-        <button @click="importJson">导入 JSON</button>
-        <button @click="exportJson" class="outline">生成 JSON</button>
-      </div>
-    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onMounted, nextTick, reactive } from 'vue';
+import { updateModule, getModule, updateUiState, getUiState } from '../utils/userData';
 
 // --- 1. 常量定义 ---
 const LEVEL_TABLE = [
@@ -153,25 +193,32 @@ const MAX_LEVEL = 65;
 const inputLevel = ref(1);
 const inputCurrentExp = ref(0);
 const inputTargetLevel = ref(60); 
-const jsonString = ref('');
+
+const isInputExpanded = ref(true); 
+const isTableExpanded = ref(false);
+
+const moduleRawData = reactive({
+  wedge_calc: 0,
+  role: 0,
+  weapon: 0,
+  Spirit: 0,
+  other: 0
+});
 
 // --- 3. 辅助计算属性 ---
 const currentLevelData = computed(() => LEVEL_TABLE.find(row => row[0] === inputLevel.value) || LEVEL_TABLE[0]);
 const targetLevelData = computed(() => LEVEL_TABLE.find(row => row[0] === inputTargetLevel.value) || LEVEL_TABLE[LEVEL_TABLE.length-1]);
 const isMaxLevel = computed(() => inputLevel.value >= MAX_LEVEL);
 
-// 当前总累计经验
 const calculatedTotalExp = computed(() => {
   return currentLevelData.value[1] + (inputCurrentExp.value || 0);
 });
 
-// 距离目标的差值
 const expToTarget = computed(() => {
   const targetExp = targetLevelData.value[1]; 
   return targetExp - calculatedTotalExp.value;
 });
 
-// 距离下一级还差多少
 const nextLevelDiff = computed(() => {
   if (isMaxLevel.value) return '已满级';
   const neededForNext = currentLevelData.value[2];
@@ -179,7 +226,6 @@ const nextLevelDiff = computed(() => {
   return diff > 0 ? diff.toLocaleString() : 0;
 });
 
-// 进度条
 const progressPercentage = computed(() => {
   if (isMaxLevel.value) return 100;
   const needed = currentLevelData.value[2];
@@ -188,96 +234,162 @@ const progressPercentage = computed(() => {
   return Math.min(100, Math.max(0, (current / needed) * 100));
 });
 
-// --- 4. 核心逻辑方法 ---
+// 模块列表展示逻辑
+const moduleDisplayList = computed(() => {
+  const total = calculatedTotalExp.value || 1; 
+  
+  const configs = [
+    { key: 'wedge_calc', name: '魔之楔', icon: '🧩', route: '/page1' },
+    { key: 'role',       name: '角色',   icon: '👤', route: '/role' },
+    { key: 'weapon',     name: '武器',   icon: '⚔️', route: '' },
+    { key: 'Spirit',     name: '魔灵',   icon: '👻', route: '' },
+    { key: 'other',      name: '其他',   icon: '📦', route: '' }
+  ];
 
+  return configs.map(cfg => {
+    const exp = moduleRawData[cfg.key] || 0;
+    const hasData = exp > 0;
+    let percent = 0;
+    if (hasData) {
+      percent = ((exp / total) * 100).toFixed(1);
+      if (percent > 100) percent = 100; 
+    }
+    return { ...cfg, exp, hasData, percent };
+  });
+});
+
+// --- 4. 核心逻辑方法 ---
 const isSpecialLevel = (lvl) => SPECIAL_LEVELS.includes(lvl);
 
-// 处理等级输入验证
 const handleLevelInput = () => {
   if (inputLevel.value < 1) inputLevel.value = 1;
   if (inputLevel.value > MAX_LEVEL) inputLevel.value = MAX_LEVEL;
-  // 联动: 如果当前等级超过了目标等级，推高目标等级
-  if (inputTargetLevel.value < inputLevel.value) {
-    inputTargetLevel.value = inputLevel.value;
-  }
+  if (inputTargetLevel.value < inputLevel.value) inputTargetLevel.value = inputLevel.value;
 };
 
-// 处理经验输入溢出 (自动升级换算)
-// 使用 @change 而不是 @input，确保用户输完数字后再计算
 const handleExpOverflow = () => {
-  if (inputCurrentExp.value < 0) {
-    inputCurrentExp.value = 0;
-    return;
-  }
-
-  // 循环检查是否升级
+  if (inputCurrentExp.value < 0) { inputCurrentExp.value = 0; return; }
   while (!isMaxLevel.value) {
-    // 重新获取当前等级的升级所需经验 (因为 inputLevel 可能在循环中变了)
     const currentRow = LEVEL_TABLE.find(r => r[0] === inputLevel.value);
     if (!currentRow) break;
-    
-    const needed = currentRow[2]; // 第3列是升级所需
-    
+    const needed = currentRow[2];
     if (inputCurrentExp.value >= needed) {
-      inputCurrentExp.value -= needed; // 扣除升级所需
-      inputLevel.value++;             // 等级 +1
-    } else {
-      break; // 不再溢出，停止循环
+      inputCurrentExp.value -= needed;
+      inputLevel.value++;
+    } else { break; }
+  }
+  if (inputTargetLevel.value < inputLevel.value) inputTargetLevel.value = inputLevel.value;
+};
+
+const validateTargetLevel = () => {
+  if (inputTargetLevel.value < inputLevel.value) inputTargetLevel.value = inputLevel.value;
+  if (inputTargetLevel.value > MAX_LEVEL) inputTargetLevel.value = MAX_LEVEL;
+};
+
+const adjustTarget = (delta) => {
+  let newValue = inputTargetLevel.value + delta;
+  if (newValue < inputLevel.value) newValue = inputLevel.value;
+  if (newValue > MAX_LEVEL) newValue = MAX_LEVEL;
+  inputTargetLevel.value = newValue;
+};
+
+const toggleInput = () => { isInputExpanded.value = !isInputExpanded.value; };
+const toggleTable = () => { isTableExpanded.value = !isTableExpanded.value; };
+
+// --- 5. 数据逻辑 (Updated) ---
+
+const calculateLevelFromTotalExp = (totalExp) => {
+  let lvl = 1;
+  for (let i = 0; i < LEVEL_TABLE.length; i++) {
+    const [level, baseExp] = LEVEL_TABLE[i];
+    if (level === MAX_LEVEL) {
+      if (totalExp >= baseExp) return { level: MAX_LEVEL, exp: totalExp - baseExp };
+    }
+    const nextRow = LEVEL_TABLE[i+1];
+    if (nextRow) {
+      if (totalExp < nextRow[1]) return { level: level, exp: totalExp - baseExp };
     }
   }
-
-  // 如果满级了，经验值保留，不再自动进位
-  if (inputLevel.value >= MAX_LEVEL) {
-    // 也可以选择在这里限制 inputCurrentExp 的最大值
-  }
-
-  // 升级后再次检查目标等级
-  if (inputTargetLevel.value < inputLevel.value) {
-    inputTargetLevel.value = inputLevel.value;
-  }
+  return { level: 1, exp: 0 };
 };
 
-// 验证目标等级
-const validateTargetLevel = () => {
-  if (inputTargetLevel.value < inputLevel.value) {
-    inputTargetLevel.value = inputLevel.value; // 强制拉回
+const loadData = () => {
+  // 1. 读取基础 exp_calc 数据 (手动填写的)
+  const expData = getModule('exp_calc');
+  if (expData) {
+    inputLevel.value = expData.level ?? 1;
+    inputCurrentExp.value = expData.currentExp ?? 0;
+    inputTargetLevel.value = expData.targetLevel ?? 60;
   }
-  if (inputTargetLevel.value > MAX_LEVEL) {
-    inputTargetLevel.value = MAX_LEVEL;
-  }
-};
 
-// --- 5. JSON 导入导出 ---
-const exportJson = () => {
-  const data = { 
-    level: inputLevel.value, 
-    exp: inputCurrentExp.value,
-    target: inputTargetLevel.value
-  };
-  jsonString.value = JSON.stringify(data);
-};
+  // 2. 遍历读取各模块数据并汇总
+  const keys = ['wedge_calc', 'role', 'weapon', 'Spirit', 'other'];
+  let grandTotalExp = 0;
 
-const importJson = () => {
-  try {
-    if (!jsonString.value) return;
-    const parsed = JSON.parse(jsonString.value);
-    if (parsed.level) inputLevel.value = Number(parsed.level);
-    if (parsed.exp !== undefined) inputCurrentExp.value = Number(parsed.exp);
-    if (parsed.target) inputTargetLevel.value = Number(parsed.target);
+  keys.forEach(key => {
+    const modData = getModule(key);
+    let modExp = 0;
     
-    // 导入后运行一次校验逻辑
-    handleLevelInput();
-    handleExpOverflow();
-  } catch (e) {
-    alert('JSON解析失败');
+    if (modData) {
+      if (key === 'role') {
+        // --- 角色模块特殊解析规则 ---
+        // 结构: { detail: [...], summary: { total: { curr: 13200 } } }
+        // 安全读取深层属性
+        if (modData.summary && modData.summary.total && modData.summary.total.curr) {
+          modExp = parseInt(modData.summary.total.curr);
+        }
+      } else {
+        // --- 其他模块常规规则 ---
+        // 优先读取 totalExp (新版), 兼容 exp (旧版 wedge)
+        modExp = parseInt(modData.totalExp ?? modData.exp ?? 0);
+      }
+    }
+    
+    // 存入展示用的 RawData
+    modExp = isNaN(modExp) ? 0 : modExp;
+    moduleRawData[key] = modExp;
+    
+    // 累加到总经验池
+    grandTotalExp += modExp;
+  });
+
+  // 3. 自动计算逻辑
+  // 如果从各模块汇总到了经验值，则重新计算当前等级和经验
+  // 逻辑：以“模块汇总”为准 (Source of Truth)，覆盖可能的手动输入
+  if (grandTotalExp > 0) {
+    const res = calculateLevelFromTotalExp(grandTotalExp);
+    inputLevel.value = res.level;
+    inputCurrentExp.value = res.exp;
   }
+
+  // 4. 读取 UI 状态
+  const uiState = getUiState();
+  if (uiState.expCalc_input_expanded !== undefined) isInputExpanded.value = uiState.expCalc_input_expanded;
+  if (uiState.expCalc_table_expanded !== undefined) isTableExpanded.value = uiState.expCalc_table_expanded;
 };
 
-// 监听 inputLevel 变化，确保目标等级始终 >= 当前等级
-watch(inputLevel, (newVal) => {
-  if (inputTargetLevel.value < newVal) {
-    inputTargetLevel.value = newVal;
-  }
+watch([inputLevel, inputCurrentExp, inputTargetLevel], () => {
+  updateModule('exp_calc', {
+    level: inputLevel.value,
+    currentExp: inputCurrentExp.value,
+    targetLevel: inputTargetLevel.value,
+    totalExp: calculatedTotalExp.value 
+  });
+});
+
+watch([isInputExpanded, isTableExpanded], ([newInput, newTable]) => {
+  updateUiState({
+    expCalc_input_expanded: newInput,
+    expCalc_table_expanded: newTable
+  });
+});
+
+onMounted(() => {
+  loadData();
+  nextTick(() => {
+    const el = document.getElementById('row-' + inputLevel.value);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
 });
 </script>
 
@@ -297,241 +409,126 @@ watch(inputLevel, (newVal) => {
   border-radius: 12px;
   padding: 20px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-  margin-bottom: 20px;
+  margin-bottom: 15px;
   border: 1px solid #e0e0e0;
 }
-.result-card.highlight-rank {
-  border-left: 5px solid #e67e22;
-}
+.result-card.highlight-rank { border-left: 5px solid #e67e22; }
 
-/* 顶部目标区域 */
-.target-badge {
-  text-align: center;
+.target-badge { text-align: center; margin-bottom: 15px; }
+.target-label { font-size: 0.95rem; color: #666; margin-bottom: 5px; }
+.target-tag { background: #e0f2f1; color: #00796b; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
+.target-value { font-size: 2.2rem; font-weight: 800; color: #d35400; line-height: 1.2; }
+.target-value.text-green { color: #42b983; }
+
+.divider { border: 0; border-top: 1px dashed #eee; margin: 15px 0; }
+
+.status-row { display: flex; align-items: center; gap: 15px; }
+.level-badge { text-align: center; min-width: 60px; }
+.level-badge .label { display: block; font-size: 0.75rem; color: #999; }
+.level-badge .value { font-size: 1.8rem; font-weight: 700; color: #2c3e50; }
+.exp-info { flex: 1; font-size: 0.9rem; color: #555; }
+.exp-info .row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+
+.progress-bar-bg { height: 6px; background: #eee; border-radius: 3px; margin-top: 8px; overflow: hidden; }
+.progress-bar-fill { height: 100%; background: #42b983; transition: width 0.3s ease; }
+
+/* 独立目标设置栏 */
+.target-setting-bar {
+  background: #fff;
+  border-radius: 12px;
+  padding: 15px;
   margin-bottom: 15px;
-}
-.target-label {
-  font-size: 0.95rem;
-  color: #666;
-  margin-bottom: 5px;
-}
-.target-tag {
-  background: #e0f2f1;
-  color: #00796b;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-weight: bold;
-}
-.target-value {
-  font-size: 2.2rem;
-  font-weight: 800;
-  color: #d35400;
-  line-height: 1.2;
-}
-.target-value.text-green {
-  color: #42b983;
-}
-
-.divider {
-  border: 0;
-  border-top: 1px dashed #eee;
-  margin: 15px 0;
-}
-
-/* 状态区域 */
-.status-row {
+  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
   display: flex;
   align-items: center;
-  gap: 15px;
-}
-.level-badge {
-  text-align: center;
-  min-width: 60px;
-}
-.level-badge .label {
-  display: block;
-  font-size: 0.75rem;
-  color: #999;
-}
-.level-badge .value {
-  font-size: 1.8rem;
-  font-weight: 700;
-  color: #2c3e50;
-}
-.exp-info {
-  flex: 1;
-  font-size: 0.9rem;
-  color: #555;
-}
-.exp-info .row {
-  display: flex;
   justify-content: space-between;
-  margin-bottom: 4px;
+  border: 1px solid #e0f2f1;
+}
+.setting-label { font-weight: bold; color: #00796b; font-size: 0.95rem; }
+.setting-input-wrapper { display: flex; align-items: center; gap: 8px; }
+.target-input-field {
+  width: 60px; padding: 8px; text-align: center; font-size: 1.1rem;
+  font-weight: bold; border: 1px solid #b2dfdb; border-radius: 6px;
+  background: #f0fdfc; outline: none; color: #00695c;
+}
+.target-input-field:focus { border-color: #009688; }
+.adj-btn {
+  width: 32px; height: 32px; border: 1px solid #eee; background: #f9f9f9;
+  border-radius: 6px; color: #666; font-size: 1.2rem; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; user-select: none;
+}
+.adj-btn:active { background: #e0e0e0; }
+
+/* 模块导航 */
+.module-header-tip {
+  display: flex; align-items: center; gap: 6px; font-size: 0.75rem;
+  color: #666; margin-bottom: 8px; padding: 0 4px;
+}
+.tip-icon { font-size: 0.9rem; }
+
+.module-nav {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 10px; margin-bottom: 15px;
 }
 
-.progress-bar-bg {
-  height: 6px;
-  background: #eee;
-  border-radius: 3px;
-  margin-top: 8px;
-  overflow: hidden;
-}
-.progress-bar-fill {
-  height: 100%;
-  background: #42b983;
-  transition: width 0.3s ease;
+.module-item {
+  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: #fff; padding: 12px 5px; border-radius: 10px; text-decoration: none;
+  border: 1px solid #eee; transition: all 0.2s; box-shadow: 0 2px 6px rgba(0,0,0,0.02); min-height: 80px;
 }
 
-/* 输入区 */
-.input-section {
-  background: #fff;
-  padding: 20px;
-  border-radius: 12px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.02);
-  margin-bottom: 20px;
+/* 状态样式 */
+.module-item.has-data {
+  background: #e0f2f1; border-color: #42b983; color: #00796b;
 }
-.input-row {
-  display: flex;
-  gap: 10px;
+.module-item.no-data {
+  background: #fff; border-color: #ddd; color: #666; cursor: pointer;
 }
-.input-group {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
+.module-item.no-data:hover {
+  border-color: #42b983; color: #42b983; box-shadow: 0 4px 12px rgba(66, 184, 131, 0.15);
 }
-.input-group label {
-  margin-bottom: 6px;
-  font-weight: 600;
-  color: #333;
-  font-size: 0.8rem;
-  white-space: nowrap;
+.module-item.disabled {
+  background: #f9f9f9; color: #ccc; border-color: #f0f0f0; cursor: default;
 }
-.main-input {
-  width: 100%;
-  padding: 10px;
-  font-size: 1rem;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  box-sizing: border-box;
-  text-align: center;
-  outline: none;
-  background: #fafafa;
-}
-.main-input:focus {
-  border-color: #42b983;
-  background: #fff;
-}
-.input-tip {
-  font-size: 0.7rem;
-  color: #999;
-  text-align: center;
-  margin-top: 4px;
-}
+.module-item.disabled .module-icon { filter: grayscale(100%); opacity: 0.5; }
 
-.target-input {
-  border-color: #b2dfdb;
-  background: #f0fdfc;
-}
-.target-input:focus {
-  border-color: #009688;
-}
+.module-icon { font-size: 1.4rem; margin-bottom: 4px; }
+.module-name { font-size: 0.8rem; font-weight: 600; margin-bottom: 6px; }
 
-/* 表格区 */
-.table-section {
-  background: #fff;
-  padding: 16px;
-  border-radius: 12px;
-  margin-bottom: 20px;
-}
-.table-section h3 {
-  margin-top: 0;
-  font-size: 1rem;
-  color: #333;
-  margin-bottom: 10px;
-}
-.table-container {
-  max-height: 250px;
-  overflow-y: auto;
-  border: 1px solid #eee;
-  border-radius: 6px;
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.85rem;
-}
-th, td {
-  padding: 8px;
-  text-align: center;
-  border-bottom: 1px solid #eee;
-}
-th {
-  background: #f9f9f9;
-  position: sticky;
-  top: 0;
-  font-weight: 600;
-  color: #666;
-}
-.special-row {
-  font-weight: bold;
-  color: #d35400;
-  background-color: #fff8f0;
-}
-.current-row {
-  background-color: #e8f5e9;
-  color: #2ecc71;
-}
-.target-row {
-  background-color: #e0f2f1;
-  color: #00796b;
-  border: 2px solid #009688;
-}
-.table-tag {
-  font-size: 0.7rem; 
-  background: #009688;
-  color: white;
-  padding: 2px 4px;
-  border-radius: 3px;
-  white-space: nowrap;
-  line-height: 1;
-  display: inline-block;
-}
+.module-stats { width: 100%; padding: 0 8px; box-sizing: border-box; text-align: center; }
+.stat-exp { font-size: 0.65rem; margin-bottom: 2px; white-space: nowrap; }
+.stat-bar-bg { height: 4px; background: rgba(0,0,0,0.1); border-radius: 2px; margin-bottom: 2px; overflow: hidden; }
+.stat-bar-fill { height: 100%; background: #42b983; border-radius: 2px; }
+.stat-percent { font-size: 0.6rem; opacity: 0.8; }
 
-/* JSON 工具 */
-.json-tools {
-  background: #fff;
-  padding: 16px;
-  border-radius: 12px;
-}
-.json-tools h3 {
-  font-size: 1rem;
-  margin-top: 0;
-}
-textarea {
-  width: 100%;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  padding: 8px;
-  font-family: monospace;
-  box-sizing: border-box;
-  margin-bottom: 10px;
-}
-.btn-group {
-  display: flex;
-  gap: 10px;
-}
-button {
-  flex: 1;
-  padding: 10px;
-  background: #42b983;
-  color: white;
-  border: none;
-  border-radius: 6px;
-  font-size: 0.9rem;
-  cursor: pointer;
-}
-button.outline {
-  background: transparent;
-  border: 1px solid #42b983;
-  color: #42b983;
-}
+.module-empty { font-size: 0.7rem; color: #bbb; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.plus-icon { font-size: 1rem; font-weight: bold; color: #ddd; }
+.module-item.no-data:hover .plus-icon { color: #42b983; }
+
+/* 其他样式保持 */
+.input-section { background: #fff; border-radius: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); margin-bottom: 15px; overflow: hidden; }
+.input-header { padding: 15px; background: #fafafa; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none; }
+.input-header .title { font-weight: 600; color: #333; font-size: 0.95rem; }
+.arrow { color: #999; font-size: 0.8rem; transition: transform 0.3s; }
+.arrow.rotated { transform: rotate(180deg); }
+.input-body { padding: 20px; border-top: 1px solid #eee; }
+.input-row { display: flex; gap: 10px; }
+.input-group { flex: 1; display: flex; flex-direction: column; }
+.input-group label { margin-bottom: 6px; font-weight: 600; color: #333; font-size: 0.8rem; white-space: nowrap; }
+.main-input { width: 100%; padding: 10px; font-size: 1rem; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; text-align: center; outline: none; background: #fff; }
+.main-input:focus { border-color: #42b983; }
+.input-tip { font-size: 0.7rem; color: #999; text-align: center; margin-top: 4px; }
+
+.table-section { background: #fff; border-radius: 12px; margin-bottom: 20px; overflow: hidden; }
+.table-header { padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; background: #fafafa; }
+.table-header h3 { margin: 0; font-size: 1rem; color: #333; }
+.table-container { max-height: 250px; overflow-y: auto; border-top: 1px solid #eee; }
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+th, td { padding: 8px; text-align: center; border-bottom: 1px solid #eee; }
+th { background: #f9f9f9; position: sticky; top: 0; font-weight: 600; color: #666; }
+.special-row { font-weight: bold; color: #d35400; background-color: #fff8f0; }
+.current-row { background-color: #e8f5e9; color: #2ecc71; }
+.target-row { background-color: #e0f2f1; color: #00796b; border: 2px solid #009688; }
+.table-tag { font-size: 0.7rem; background: #009688; color: white; padding: 2px 4px; border-radius: 3px; white-space: nowrap; line-height: 1; display: inline-block; }
 </style>
