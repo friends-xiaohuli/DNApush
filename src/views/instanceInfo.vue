@@ -41,18 +41,18 @@
           <div class="time-prediction-row">
             <div class="time-box">
               <div class="time-label">最近刷新</div>
-              <div class="time-value">{{ formatTime(currentStatus.current_at) }}</div>
+              <div class="time-value">{{ currentStatus.start_time }}</div>
               <div class="time-sub">周期ID: {{ currentStatus.id }}</div>
             </div>
             
             <div class="time-arrow">
-              <span class="cycle-badge">{{ currentStatus.refresh_cycle }}h</span>
+              <span class="cycle-badge">72h</span>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
             </div>
 
             <div class="time-box highlight">
               <div class="time-label">预计下次刷新</div>
-              <div class="time-value bold">{{ formatTime(currentStatus.current_at + currentStatus.refresh_cycle * 3600) }}</div>
+              <div class="time-value bold">{{ currentStatus.end_time }}</div>
             </div>
           </div>
         </div>

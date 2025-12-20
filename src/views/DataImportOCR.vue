@@ -1,207 +1,242 @@
 <script setup>
 import { ref, reactive } from 'vue';
 import Tesseract from 'tesseract.js';
-import { updateModule } from '../utils/userData';
+import { updateModule, getModule } from '../utils/userData';
 
-// ----------------------------------------------------------------
+// ==========================================
 // 1. 状态管理
-// ----------------------------------------------------------------
+// ==========================================
 const isProcessing = ref(false);
+const isDragging = ref(false); // 新增：拖拽状态
 const progress = ref(0);
 const statusText = ref('等待上传...');
 const showPreview = ref(false);
 
-// 临时存储 (新增 exp_calc 用于存放当前等级经验)
+// 预览数据容器
 const tempData = reactive({
-  exp_calc: { level: null, current: null, total: null }, // 新增：等级与当前经验
   role: { count: null, base: null, break: null, origin: null },
   spirit: { count: null, base: null, break: null },
   weapon: { count: null, base: null, break: null, smelt: null },
   wedge: { count: null, base: null, isTaskDone: false },
-  other: { quest: null, daily: null }
+  other: { quest: null, daily: null },
+  currentLevelExp: null
 });
 
-// ----------------------------------------------------------------
-// 2. 核心解析逻辑 (智能纠错)
-// ----------------------------------------------------------------
+// ==========================================
+// 2. 图像预处理 (Layer 1: Canvas Binarization)
+// ==========================================
+const preprocessImage = (file) => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const reader = new FileReader();
+    
+    reader.onload = (e) => {
+      img.src = e.target.result;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
 
-/**
- * 专门修复 "7860711660" 这种斜杠被识别为7的问题
- * @param {string} str - 纯数字字符串
- */
-const fixSlashSevenError = (str) => {
-  // 如果包含除数字外的字符（如 / | l），直接交给正则处理，这里只处理纯数字灾难
-  if (!/^\d+$/.test(str)) return null;
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
 
-  // 暴力尝试：以每一个 '7' 为界进行分割
-  // 寻找最佳分割点：使得 前半部分 <= 后半部分
-  for (let i = 1; i < str.length - 1; i++) {
-    if (str[i] === '7') {
-      const partA = str.substring(0, i);
-      const partB = str.substring(i + 1);
-      const numA = parseInt(partA);
-      const numB = parseInt(partB);
-      
-      // 逻辑校验：通常当前经验 <= 总经验
-      // 且两边数字长度不能悬殊太大 (比如 1 和 100000)
-      if (numA <= numB && Math.abs(partA.length - partB.length) <= 3) {
-        return { current: numA, total: numB };
+        // 二值化处理：增强文字对比度，消除背景干扰
+        for (let i = 0; i < data.length; i += 4) {
+          const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+          // 阈值设为 170 (经验值，针对游戏深色背景浅色文字效果较好)
+          const val = avg > 170 ? 0 : 255; // 白底黑字
+          
+          data[i] = val;     // R
+          data[i + 1] = val; // G
+          data[i + 2] = val; // B
+        }
+        
+        ctx.putImageData(imageData, 0, 0);
+        resolve(canvas.toDataURL('image/jpeg')); 
+      };
+    };
+    reader.readAsDataURL(file);
+  });
+};
+
+// ==========================================
+// 3. 模糊匹配算法 (Layer 2: Fuzzy Matching)
+// ==========================================
+const levenshtein = (a, b) => {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const matrix = [];
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) == a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1));
       }
+    }
+  }
+  return matrix[b.length][a.length];
+};
+
+const identifyCategory = (cleanLine) => {
+  const targets = [
+    { key: 'role_base', words: ['首次获得角色'] },
+    { key: 'role_break', words: ['角色突破'] },
+    { key: 'role_origin', words: ['角色溯源'] },
+    { key: 'spirit_base', words: ['首次获得魔灵'] },
+    { key: 'spirit_break', words: ['魔灵突破'] },
+    { key: 'wedge_base', words: ['首次获得魔之楔', '首次获得魔之枫', '首次获得魔之模'] }, 
+    { key: 'wedge_task', words: ['魔之楔任务', '魔之模任务'] },
+    { key: 'weapon_base', words: ['首次获得武器'] },
+    { key: 'weapon_break', words: ['武器突破'] },
+    { key: 'weapon_smelt', words: ['武器熔炼', '武器精炼'] },
+    { key: 'other_quest', words: ['主线', '支线', '探索奖励'] },
+    { key: 'other_daily', words: ['每日任务'] },
+    { key: 'level_exp', words: ['当前等级经验'] }
+  ];
+
+  let bestMatch = null;
+  let minDistance = 3; 
+
+  for (const t of targets) {
+    for (const w of t.words) {
+      if (cleanLine.includes(w)) return t.key;
+      const sub = cleanLine.substring(0, w.length + 1); 
+      const dist = levenshtein(sub, w);
+      if (dist < minDistance) {
+        minDistance = dist;
+        bestMatch = t.key;
+      }
+    }
+  }
+  return bestMatch;
+};
+
+// ==========================================
+// 4. 数字解析逻辑 (Layer 3: Logic Fix)
+// ==========================================
+
+// 智能切分粘连数字
+const smartSplitProgress = (digits) => {
+  if (!digits || digits.length < 5) return null;
+  if (!/^\d+$/.test(digits)) return null;
+
+  for (let i = 2; i < digits.length - 2; i++) {
+    const a = digits.slice(0, i);
+    const b = digits.slice(i); 
+    const bSkip = digits.slice(i + 1); 
+
+    const na = parseInt(a);
+    const nb = parseInt(b);
+    const nbSkip = parseInt(bSkip);
+
+    if (na <= nbSkip && na > 0 && nbSkip > 1000) {
+      return { curr: na, total: nbSkip };
+    }
+    if (na <= nb && na > 0 && nb > 1000) {
+      return { curr: na, total: nb };
     }
   }
   return null;
 };
 
-/**
- * 提取进度条类型的数值 (例如: 7860/11660)
- * 返回 { current, total } 或仅返回 current
- */
-const extractProgress = (line) => {
-  // 1. 移除中文和空格
-  let clean = line.replace(/[\u4e00-\u9fa5\s,]/g, '');
+// 提取当前值 (锚点法)
+const extractCurrentValue = (line, maxAnchor) => {
+  const clean = line.replace(/[^0-9/|7lI1\s]/g, '');
   
-  // 2. 尝试标准匹配 (数字+分隔符+数字)
-  // 分隔符可能是 / | l I 1 7
-  const match = clean.match(/(\d+)[/|lI](\d+)/);
-  if (match) {
-    return { current: parseInt(match[1]), total: parseInt(match[2]) };
+  if (maxAnchor) {
+    const regex = new RegExp(`(\\d+)[\\s\\/|7lI1]*${maxAnchor}`);
+    const match = clean.match(regex);
+    if (match && match[1]) {
+      const val = parseInt(match[1]);
+      if (val <= maxAnchor) return val;
+    }
   }
 
-  // 3. 尝试 "7" 误读修复 (针对 7860711660)
-  const fix7 = fixSlashSevenError(clean);
-  if (fix7) return fix7;
+  const numOnly = line.replace(/[^0-9]/g, '');
+  const splitRes = smartSplitProgress(numOnly);
+  if (splitRes) return splitRes.curr;
 
-  // 4. 兜底：只提取前面的数字
-  const simpleMatch = clean.match(/^(\d+)/);
-  return simpleMatch ? { current: parseInt(simpleMatch[1]), total: 0 } : null;
+  const nums = line.replace(/[^0-9]/g, ' ').trim().split(/\s+/);
+  const lastNum = nums[nums.length - 1];
+  return lastNum ? parseInt(lastNum) : null;
 };
 
-/**
- * 提取特定分母的分数 (例如: 249/473)
- */
-const extractFraction = (line, maxCap) => {
-  const clean = line.replace(/[\s,]/g, '');
-  // 动态正则：寻找 "数字" + "分隔符或7" + "已知最大值"
-  const regex = new RegExp(`(\\d+)[\\/|7lI]${maxCap}`);
-  const match = clean.match(regex);
-  return match ? parseInt(match[1]) : null;
-};
-
-// --- 解析主入口 ---
 const parseOCRResult = (text) => {
-  console.log("Raw OCR:", text);
-  const lines = text.split('\n').filter(line => line.trim() !== '');
+  // --- LOG: 输出原始文本 ---
+  console.log("🟦 [OCR 原始文本]:\n", text);
+  
+  const lines = text.split('\n').filter(l => l.trim().length > 2);
 
-  // 重置数据
+  // 清空旧数据
   Object.keys(tempData).forEach(k => {
-    Object.keys(tempData[k]).forEach(subK => tempData[k][subK] = null);
+    if (typeof tempData[k] === 'object') Object.keys(tempData[k]).forEach(sk => tempData[k][sk] = null);
+    else tempData[k] = null;
   });
 
   lines.forEach(line => {
-    const str = line.replace(/\s+/g, '');
+    const cleanLine = line.replace(/\s+/g, '');
+    const category = identifyCategory(cleanLine);
 
-    // 1. 顶部等级栏 (57 当前等级经验 7860/11660)
-    if (str.includes('当前等级经验')) {
-      // 提取等级 (行首数字)
-      const lvMatch = line.match(/^(\d+)/);
-      if (lvMatch) tempData.exp_calc.level = parseInt(lvMatch[1]);
-      
-      // 提取经验
-      const expData = extractProgress(line.replace(/^\d+/, '')); // 去掉等级再提取
-      if (expData) {
-        tempData.exp_calc.current = expData.current;
-        tempData.exp_calc.total = expData.total;
-      }
-    }
+    if (!category) return;
 
-    // 2. 魔灵 Spirit
-    else if (str.includes('首次获得魔灵')) {
-      tempData.spirit.count = extractFraction(line, 61) ?? extractFraction(line, 60);
-      const exp = extractProgress(line);
-      if(exp) tempData.spirit.base = exp.current;
-    } else if (str.includes('魔灵突破')) {
-      const exp = extractProgress(line);
-      if(exp) tempData.spirit.break = exp.current;
+    if (category === 'level_exp') {
+      const split = smartSplitProgress(line.replace(/[^0-9]/g, ''));
+      if (split) tempData.currentLevelExp = split.curr;
+    } 
+    else if (category === 'role_base') {
+      tempData.role.count = extractCurrentValue(line, 19) ?? extractCurrentValue(line, 18);
+      tempData.role.base = extractCurrentValue(line, 9000); 
     }
-
-    // 3. 魔之楔 Wedge
-    else if (str.includes('首次获得魔之楔')) {
-      tempData.wedge.count = extractFraction(line, 473);
-      const exp = extractProgress(line);
-      if(exp) tempData.wedge.base = exp.current;
-    } else if (str.includes('魔之楔任务')) {
-      const exp = extractProgress(line);
-      // 只要识别出的当前值 > 100，就认为任务已完成 (通常是 1430)
-      tempData.wedge.isTaskDone = (exp && exp.current > 100);
+    else if (category === 'role_break') tempData.role.break = extractCurrentValue(line, 59850);
+    else if (category === 'role_origin') tempData.role.origin = extractCurrentValue(line, 28500);
+    else if (category === 'spirit_base') {
+      tempData.spirit.count = extractCurrentValue(line, 61) ?? extractCurrentValue(line, 60);
+      tempData.spirit.base = extractCurrentValue(line, 6100);
     }
-
-    // 4. 其他 Other
-    else if (str.includes('主线') || str.includes('探索奖励')) {
-      const exp = extractProgress(line);
-      if(exp) tempData.other.quest = exp.current;
-    } else if (str.includes('每日任务')) {
-      const exp = extractProgress(line);
-      if(exp) tempData.other.daily = exp.current;
+    else if (category === 'spirit_break') tempData.spirit.break = extractCurrentValue(line, 10200); 
+    else if (category === 'wedge_base') {
+      tempData.wedge.count = extractCurrentValue(line, 473);
+      tempData.wedge.base = extractCurrentValue(line, 51590);
     }
-    
-    // 5. 角色 Role (防止遗漏)
-    else if (str.includes('首次获得角色')) {
-      tempData.role.count = extractFraction(line, 18) ?? extractFraction(line, 19);
-      const exp = extractProgress(line);
-      if(exp) tempData.role.base = exp.current;
-    } else if (str.includes('角色突破')) {
-      const exp = extractProgress(line);
-      if(exp) tempData.role.break = exp.current;
-    } else if (str.includes('角色溯源')) {
-      const exp = extractProgress(line);
-      if(exp) tempData.role.origin = exp.current;
+    else if (category === 'wedge_task') {
+      const val = extractCurrentValue(line, 1430);
+      tempData.wedge.isTaskDone = (val > 1000); 
     }
+    else if (category === 'weapon_base') {
+      tempData.weapon.count = extractCurrentValue(line, 45);
+      tempData.weapon.base = extractCurrentValue(line, 18000);
+    }
+    else if (category === 'weapon_break') tempData.weapon.break = extractCurrentValue(line, 113400);
+    else if (category === 'weapon_smelt') tempData.weapon.smelt = extractCurrentValue(line, 45000);
+    else if (category === 'other_quest') tempData.other.quest = extractCurrentValue(line);
+    else if (category === 'other_daily') tempData.other.daily = extractCurrentValue(line);
   });
+
+  // --- LOG: 输出解析后的数据对象 ---
+  // 使用 JSON.parse(JSON.stringify()) 来深拷贝一个纯净对象用于打印，避免 Proxy 干扰
+  console.log("🟩 [OCR 解析结果]:", JSON.parse(JSON.stringify(tempData)));
 
   showPreview.value = true;
 };
 
-// ----------------------------------------------------------------
-// 3. 确认导入
-// ----------------------------------------------------------------
+// ==========================================
+// 5. 保存与交互
+// ==========================================
 const confirmImport = () => {
-  // 1. 等级计算器 (exp_calc)
-  if (tempData.exp_calc.current !== null) {
-    updateModule('exp_calc', {
-      level: tempData.exp_calc.level,
-      currentExp: tempData.exp_calc.current,
-      // 可以在这里计算 targetLevel 或其他逻辑
-    });
-  }
-
-  // 2. Wedge (魔之楔)
+  // ... (保持原有的保存逻辑不变) ...
   if (tempData.wedge.base !== null) {
     updateModule('wedge_calc', {
       count: tempData.wedge.count || 0,
       exp: tempData.wedge.base || 0,
-      isTaskCompleted: tempData.wedge.isTaskDone
+      isTaskCompleted: tempData.wedge.isTaskDone,
+      totalExp: (tempData.wedge.base || 0) + (tempData.wedge.isTaskDone ? 1430 : 0)
     });
   }
-
-  // 3. Spirit (魔灵)
-  if (tempData.spirit.base !== null) {
-    updateModule('Spirit', {
-      count: tempData.spirit.count || 0,
-      baseExp: tempData.spirit.base || 0,
-      breakExp: tempData.spirit.break || 0,
-      breakCounts: [0,0,0] // 重置推导
-    });
-  }
-
-  // 4. Other (其他)
-  if (tempData.other.quest !== null) {
-    updateModule('other', {
-      questExp: tempData.other.quest || 0,
-      dailyExp: tempData.other.daily || 0
-    });
-  }
-  
-  // 5. Role (角色 - 如果识别到了)
   if (tempData.role.base !== null) {
     updateModule('role', {
       activeMode: 'numeric',
@@ -210,63 +245,122 @@ const confirmImport = () => {
         baseExp: tempData.role.base || 0,
         breakExp: tempData.role.break || 0,
         originExp: tempData.role.origin || 0,
-        breakCounts: [0,0,0,0,0,0],
-        originCounts: [0,0,0,0,0,0]
+        breakCounts: [0,0,0,0,0,0], originCounts: [0,0,0,0,0,0]
       }
     });
   }
+  if (tempData.spirit.base !== null) {
+    updateModule('Spirit', {
+      count: tempData.spirit.count || 0,
+      baseExp: tempData.spirit.base || 0,
+      breakExp: tempData.spirit.break || 0,
+      breakCounts: [0,0,0]
+    });
+  }
+  if (tempData.weapon.base !== null) {
+    updateModule('weapon', {
+      count: tempData.weapon.count || 0,
+      baseExp: tempData.weapon.base || 0,
+      breakExp: tempData.weapon.break || 0,
+      smeltExp: tempData.weapon.smelt || 0,
+      breakCounts: [0,0,0,0,0,0], smeltCounts: [0,0,0,0,0]
+    });
+  }
+  if (tempData.other.quest !== null) {
+    updateModule('other', {
+      questExp: tempData.other.quest || 0,
+      dailyExp: tempData.other.daily || 0
+    });
+  }
+  if (tempData.currentLevelExp !== null) {
+    const d = getModule('exp_calc') || {};
+    d.currentExp = tempData.currentLevelExp;
+    updateModule('exp_calc', d);
+  }
 
   showPreview.value = false;
-  alert('数据已导入！请刷新页面或查看各模块。');
+  alert('数据已覆盖导入！各计算器已根据导入数据自动推测分布。');
 };
 
-const cancelImport = () => showPreview.value = false;
-
-// ----------------------------------------------------------------
-// 4. 文件上传
-// ----------------------------------------------------------------
-const handleFile = async (event) => {
-  const file = event.target.files[0];
+// ==========================================
+// 6. 统一文件处理 (支持点击和拖拽)
+// ==========================================
+const startOcr = async (file) => {
   if (!file) return;
-
+  
   isProcessing.value = true;
   progress.value = 0;
-  statusText.value = 'OCR启动中...';
+  statusText.value = '正在预处理图片...';
 
   try {
+    // 1. 预处理
+    const processedImgDataUrl = await preprocessImage(file);
+    
+    statusText.value = 'OCR 识别中...';
+    
+    // 2. 识别
     const { data: { text } } = await Tesseract.recognize(
-      file,
-      'chi_sim',
+      processedImgDataUrl, 
+      'chi_sim', 
       {
+        tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK,
         logger: m => {
           if (m.status === 'recognizing text') {
             progress.value = Math.floor(m.progress * 100);
-            statusText.value = `识别中... ${progress.value}%`;
           }
         }
       }
     );
+
+    // 3. 解析
     parseOCRResult(text);
+
   } catch (err) {
-    console.error(err);
-    alert("识别失败：请将图片【另存为】到本地后再上传，不要直接从聊天窗口拖拽。");
+    console.error("OCR Error:", err);
+    alert('识别失败，请重试');
   } finally {
     isProcessing.value = false;
+    isDragging.value = false; // 确保拖拽状态复位
     statusText.value = '等待上传...';
-    event.target.value = '';
+  }
+};
+
+// Input Change 事件
+const handleFileChange = (event) => {
+  startOcr(event.target.files[0]);
+  // 清空 value 允许重复上传同一文件
+  event.target.value = '';
+};
+
+// Drop 事件
+const handleDrop = (event) => {
+  const file = event.dataTransfer.files[0];
+  if (file && file.type.startsWith('image/')) {
+    startOcr(file);
+  } else {
+    alert("请拖入有效的图片文件");
+    isDragging.value = false;
   }
 };
 </script>
 
 <template>
   <div class="ocr-wrapper">
-    
-    <div class="upload-area" :class="{ processing: isProcessing }" v-if="!showPreview">
-      <input type="file" accept="image/*" @change="handleFile" :disabled="isProcessing" id="ocr-upload"/>
-      <label for="ocr-upload" class="upload-label">
+    <div 
+      class="upload-area" 
+      :class="{ processing: isProcessing, dragging: isDragging }" 
+      v-if="!showPreview"
+      @dragover.prevent="isDragging = true"
+      @dragleave.prevent="isDragging = false"
+      @drop.prevent="handleDrop"
+    >
+      <input type="file" accept="image/*" @change="handleFileChange" :disabled="isProcessing" id="ocr-up"/>
+      <label for="ocr-up" class="upload-label">
         <div class="icon">📷</div>
-        <div class="text" v-if="!isProcessing">点击上传“历练经验”截图 (请先保存图片)</div>
-        <div class="text" v-else>{{ statusText }}</div>
+        <div class="text" v-if="!isProcessing">
+          {{ isDragging ? '释放以解析图片' : '点击上传或拖拽截图到此处' }}
+        </div>
+        <div class="text" v-else>{{ statusText }} ({{ progress }}%)</div>
       </label>
       <div class="progress-bar" v-if="isProcessing"><div class="bar-fill" :style="{ width: progress + '%' }"></div></div>
     </div>
@@ -274,95 +368,97 @@ const handleFile = async (event) => {
     <div class="preview-panel" v-if="showPreview">
       <div class="panel-header">
         <h3>数据校对</h3>
-        <span class="sub-tip">请确认自动修复的数据是否正确</span>
+        <button class="close-btn" @click="showPreview = false">×</button>
       </div>
 
-      <div class="form-grid">
-        
-        <div class="form-group highlight" v-if="tempData.exp_calc.current !== null">
-          <div class="group-title">当前等级 (Level)</div>
-          <div class="row">
-            <label>等级</label> <input type="number" v-model.number="tempData.exp_calc.level">
+      <div class="data-grid">
+        <div class="data-row highlight" v-if="tempData.currentLevelExp !== null">
+          <span class="label">当前等级经验</span>
+          <input type="number" v-model.number="tempData.currentLevelExp">
+        </div>
+
+        <div class="section-title">魔之楔 (Wedge)</div>
+        <div class="data-row">
+          <span class="label">首次获得 (数量/经验)</span>
+          <div class="inputs">
+            <input type="number" v-model.number="tempData.wedge.count" placeholder="Num">
+            <input type="number" v-model.number="tempData.wedge.base" placeholder="Exp">
           </div>
-          <div class="row">
-            <label>当前经验</label> <input type="number" v-model.number="tempData.exp_calc.current">
+        </div>
+        <div class="data-row check-row">
+          <span class="label">任务奖励 (1430)</span>
+          <label><input type="checkbox" v-model="tempData.wedge.isTaskDone"> 完成</label>
+        </div>
+
+        <div class="section-title">角色 (Role)</div>
+        <div class="data-row">
+          <span class="label">首次获得 (数量/经验)</span>
+          <div class="inputs">
+            <input type="number" v-model.number="tempData.role.count" placeholder="Num">
+            <input type="number" v-model.number="tempData.role.base" placeholder="Exp">
+          </div>
+        </div>
+        <div class="data-row">
+          <span class="label">突破 / 溯源</span>
+          <div class="inputs">
+            <input type="number" v-model.number="tempData.role.break" placeholder="Brk">
+            <input type="number" v-model.number="tempData.role.origin" placeholder="Org">
           </div>
         </div>
 
-        <div class="form-group" v-if="tempData.wedge.base !== null">
-          <div class="group-title">魔之楔 (Wedge)</div>
-          <div class="row">
-            <label>数量</label> <input type="number" v-model.number="tempData.wedge.count">
-          </div>
-          <div class="row">
-            <label>首获经验</label> <input type="number" v-model.number="tempData.wedge.base">
-          </div>
-          <div class="row check-row">
-            <label>任务已完成?</label> <input type="checkbox" v-model="tempData.wedge.isTaskDone">
+        <div class="section-title">魔灵 (Spirit)</div>
+        <div class="data-row">
+          <span class="label">首次获得 / 突破</span>
+          <div class="inputs">
+            <input type="number" v-model.number="tempData.spirit.base" placeholder="Base">
+            <input type="number" v-model.number="tempData.spirit.break" placeholder="Brk">
           </div>
         </div>
 
-        <div class="form-group" v-if="tempData.spirit.base !== null">
-          <div class="group-title">魔灵 (Spirit)</div>
-          <div class="row">
-            <label>数量</label> <input type="number" v-model.number="tempData.spirit.count">
-          </div>
-          <div class="row">
-            <label>首获经验</label> <input type="number" v-model.number="tempData.spirit.base">
-          </div>
-          <div class="row">
-            <label>突破经验</label> <input type="number" v-model.number="tempData.spirit.break">
+        <div class="section-title">其他 (Other)</div>
+        <div class="data-row">
+          <span class="label">探索 / 每日</span>
+          <div class="inputs">
+            <input type="number" v-model.number="tempData.other.quest" placeholder="Quest">
+            <input type="number" v-model.number="tempData.other.daily" placeholder="Daily">
           </div>
         </div>
-
-        <div class="form-group" v-if="tempData.other.quest !== null">
-          <div class="group-title">其他 (Other)</div>
-          <div class="row">
-            <label>探索/任务</label> <input type="number" v-model.number="tempData.other.quest">
-          </div>
-          <div class="row">
-            <label>每日任务</label> <input type="number" v-model.number="tempData.other.daily">
-          </div>
-        </div>
-
       </div>
 
-      <div class="action-btns">
-        <button class="btn cancel" @click="cancelImport">放弃</button>
-        <button class="btn confirm" @click="confirmImport">确认覆盖</button>
+      <div class="action-bar">
+        <button class="btn confirm" @click="confirmImport">确认并覆盖数据</button>
       </div>
     </div>
-
   </div>
 </template>
 
 <style scoped>
-.ocr-wrapper { margin-bottom: 20px; font-family: "Inter", sans-serif; }
-.upload-area { position: relative; background: #f9fafb; border: 2px dashed #d1d5db; border-radius: 8px; text-align: center; transition: all 0.2s; cursor: pointer; }
-.upload-area:hover { border-color: #3b82f6; background: #eff6ff; }
-input[type="file"] { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
-.upload-label { padding: 20px; pointer-events: none; }
-.icon { font-size: 24px; margin-bottom: 8px; }
-.text { font-size: 13px; color: #4b5563; }
-.progress-bar { position: absolute; bottom: 0; left: 0; width: 100%; height: 4px; background: #e5e7eb; }
+.ocr-wrapper { margin-bottom: 20px; font-family: sans-serif; }
+.upload-area { position: relative; background: #f8fafc; border: 2px dashed #94a3b8; border-radius: 8px; text-align: center; cursor: pointer; transition: all 0.2s; }
+.upload-area:hover, .upload-area.dragging { border-color: #3b82f6; background: #eff6ff; }
+.upload-label { padding: 20px; pointer-events: none; display: block; }
+.icon { font-size: 24px; margin-bottom: 5px; }
+.text { color: #475569; font-size: 14px; font-weight: 500; }
+input[type="file"] { display: none; }
+.progress-bar { position: absolute; bottom: 0; left: 0; width: 100%; height: 4px; background: #e2e8f0; }
 .bar-fill { height: 100%; background: #3b82f6; transition: width 0.2s; }
 
-.preview-panel { background: #fff; border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
-.panel-header { margin-bottom: 15px; border-bottom: 1px solid #f3f4f6; padding-bottom: 10px; }
-.panel-header h3 { margin: 0; font-size: 16px; color: #111827; }
-.sub-tip { font-size: 12px; color: #6b7280; }
+.preview-panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+.panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #f1f5f9; padding-bottom: 8px; }
+.panel-header h3 { margin: 0; font-size: 16px; color: #1e293b; }
+.close-btn { background: none; border: none; font-size: 20px; cursor: pointer; color: #94a3b8; }
 
-.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px; }
-.form-group { background: #f9fafb; padding: 10px; border-radius: 6px; border: 1px solid #f3f4f6; }
-.form-group.highlight { border-color: #bfdbfe; background: #eff6ff; } /* 高亮等级栏 */
-.group-title { font-weight: bold; font-size: 13px; color: #3b82f6; margin-bottom: 8px; }
-.row { display: flex; align-items: center; margin-bottom: 6px; }
-.row label { flex: 1; font-size: 12px; color: #4b5563; }
-.row input[type="number"] { width: 70px; padding: 4px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; text-align: right; }
-.row.check-row { justify-content: space-between; }
+.data-grid { display: flex; flex-direction: column; gap: 6px; max-height: 450px; overflow-y: auto; padding-right: 4px; }
+.section-title { font-size: 12px; font-weight: bold; color: #3b82f6; margin-top: 8px; background: #eff6ff; padding: 2px 6px; border-radius: 4px; width: fit-content; }
+.data-row { display: flex; align-items: center; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+.data-row.highlight { background: #fff7ed; padding: 6px; border-radius: 4px; border: 1px solid #ffedd5; }
+.label { color: #475569; flex: 1; }
+.inputs { display: flex; gap: 5px; width: 150px; }
+input[type="number"] { width: 70px; padding: 4px; border: 1px solid #cbd5e1; border-radius: 4px; text-align: right; font-family: "JetBrains Mono"; font-size: 13px; }
+.check-row label { font-size: 13px; display: flex; align-items: center; cursor: pointer; }
+.check-row input { width: auto; margin-right: 4px; }
 
-.action-btns { display: flex; gap: 10px; justify-content: flex-end; }
-.btn { padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; }
-.btn.cancel { background: #f3f4f6; color: #4b5563; }
-.btn.confirm { background: #10b981; color: white; }
+.action-bar { margin-top: 15px; text-align: right; }
+.btn.confirm { background: #10b981; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; }
+.btn.confirm:hover { background: #059669; }
 </style>

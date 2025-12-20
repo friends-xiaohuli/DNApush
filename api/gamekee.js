@@ -1,10 +1,9 @@
 // Vercel Serverless Function (Node.js)
 export default async function handler(req, res) {
-  // 1. 定义目标 URL (对应你原来的 rewrite 逻辑 /api_gamekee -> /v1)
-  const URL_STATUS = 'https://www.gamekee.com/v1/dnaPetConfig/getCurrentData';
+  // 1. Info 接口 (外部获取)
   const URL_INFO = 'https://www.gamekee.com/v1/dna/instanceInfo';
 
-  // 2. 设置伪造的请求头 (完全复刻你 vite.config.js 里的配置)
+  // 2. 设置伪造请求头
   const headers = {
     'Referer': 'https://www.gamekee.com/dna/',
     'Origin': 'https://www.gamekee.com',
@@ -15,23 +14,67 @@ export default async function handler(req, res) {
   };
 
   try {
-    // 3. 并行发起请求 (服务端请求，速度更快)
-    const [statusResponse, infoResponse] = await Promise.all([
-      fetch(URL_STATUS, { method: 'GET', headers }),
-      fetch(URL_INFO, { method: 'GET', headers })
-    ]);
-
-    // 4. 解析 JSON
-    const statusData = await statusResponse.json();
+    // 3. 并行处理：获取远程 Info + 本地计算 Status
+    // 注意：我们将 fetch 放在这里，status 计算很快，几乎瞬间完成
+    const infoResponse = await fetch(URL_INFO, { method: 'GET', headers });
     const infoData = await infoResponse.json();
 
-    // 5. 检查上游接口状态 (可选，根据对方接口返回结构调整)
-    if (statusData.code !== 0 || infoData.code !== 0) {
-      return res.status(502).json({ error: 'GameKee 接口返回异常' });
+    // 4. 本地计算 Status 数据 (纯时间戳逻辑)
+    // ---------------------------------------------------------
+    
+    // 锚点配置: 2025-11-25 05:00:00 (北京) -> 1764018000000 (UTC毫秒)
+    const ANCHOR_TIMESTAMP = 1764018000000; 
+    const ANCHOR_ID = 2; 
+    const CYCLE_DAYS = 3;
+    const CYCLE_MS = CYCLE_DAYS * 24 * 60 * 60 * 1000; // 259200000 ms
+
+    // 获取当前服务器时间
+    const now = Date.now();
+
+    // 计算经过的周期数 (向下取整)
+    // 逻辑：(当前时间 - 锚点时间) / 周期时长
+    let cyclesPassed = Math.floor((now - ANCHOR_TIMESTAMP) / CYCLE_MS);
+
+    // ID 推导 (线性增长)
+    const currentId = ANCHOR_ID + cyclesPassed;
+
+    // 时间段推导
+    const currentStartTimeMs = ANCHOR_TIMESTAMP + (cyclesPassed * CYCLE_MS);
+    const currentEndTimeMs = currentStartTimeMs + CYCLE_MS;
+
+    // 格式化工具: 转为北京时间字符串 YYYY-MM-DD HH:mm:ss
+    const formatBJ = (ms) => {
+      return new Date(ms).toLocaleString('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        // year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        // second: '2-digit',
+        hour12: false
+      }).replace(/\//g, '-');
+    };
+
+    // 构造模拟 Status 响应
+    const statusData = {
+      code: 0,
+      msg: "success (timestamp calc)",
+      data: {
+        id: currentId,
+        content_id: currentId,
+        start_time: formatBJ(currentStartTimeMs),
+        end_time: formatBJ(currentEndTimeMs),
+        server_time: formatBJ(now)
+      }
+    };
+    // ---------------------------------------------------------
+
+    // 5. 错误处理与返回
+    if (infoData.code !== 0) {
+      return res.status(502).json({ error: 'GameKee Info 接口异常' });
     }
 
-    // 6. 将合并后的数据返回给你的前端
-    // 为了方便前端使用，我们构造一个统一的结构
     return res.status(200).json({
       statusResult: statusData,
       infoResult: infoData
@@ -39,6 +82,6 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('API Error:', error);
-    return res.status(500).json({ error: '服务端请求失败' });
+    return res.status(500).json({ error: 'Internal Server Error' });
   }
 }
