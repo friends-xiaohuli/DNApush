@@ -23,6 +23,7 @@ const bgUrl = ref(`url('https://www.loliapi.com/acg/?time=${new Date().getTime()
       <router-link to="/page2" class="tab-item">api测试</router-link>
       <router-link to="/instanceInfo" class="tab-item">instanceInfo</router-link>
       <router-link to="/page3" class="tab-item">数据存储</router-link>
+      <router-link to="/DataImportOCR" class="tab-item">ocr-upload</router-link>
       <router-link to="/about" class="tab-item">关于我们</router-link>
     </nav>
 

@@ -241,9 +241,9 @@ const moduleDisplayList = computed(() => {
   const configs = [
     { key: 'wedge_calc', name: '魔之楔', icon: '🧩', route: '/page1' },
     { key: 'role',       name: '角色',   icon: '👤', route: '/role' },
-    { key: 'weapon',     name: '武器',   icon: '⚔️', route: '' },
-    { key: 'Spirit',     name: '魔灵',   icon: '👻', route: '' },
-    { key: 'other',      name: '其他',   icon: '📦', route: '' }
+    { key: 'weapon',     name: '武器',   icon: '⚔️', route: '/weapon' },
+    { key: 'Spirit',     name: '魔灵',   icon: '👻', route: '/spirit' },
+    { key: 'other',      name: '其他',   icon: '📦', route: '/other' }
   ];
 
   return configs.map(cfg => {

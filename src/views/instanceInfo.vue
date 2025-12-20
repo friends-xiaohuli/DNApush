@@ -227,7 +227,7 @@ const matchType = (name, keywords) => keywords.some(k => name.includes(k));
 const getColorTheme = (name) => {
   if (matchType(name, ['无尽', '探险'])) return 'theme-blue';    
   if (matchType(name, ['护送'])) return 'theme-green';          
-  if (matchType(name, ['避险'])) return 'theme-cyan';           
+  if (matchType(name, ['避险','迁移'])) return 'theme-cyan';           
   if (matchType(name, ['调停'])) return 'theme-orange';         
   if (matchType(name, ['驱离'])) return 'theme-red';            
   if (matchType(name, ['驱逐'])) return 'theme-purple';    

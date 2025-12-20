@@ -1,346 +1,336 @@
 <script setup>
-import { ref, reactive, watch, onMounted } from 'vue'
-// 引入数据管理工具
-// 如果路径报错，请根据你的文件结构调整，例如 ../utils/userData
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { updateModule, getModule } from '../utils/userData';
 
-// --- 1. 核心配置 ---
-const qualities = [
-  { name: "白色", max: 35,  exp_per: 20,  color: "#757575" },
-  { name: "绿色", max: 36,  exp_per: 40,  color: "#2E7D32" },
-  { name: "蓝色", max: 89,  exp_per: 50,  color: "#1565C0" },
-  { name: "紫色", max: 173, exp_per: 100, color: "#7B1FA2" },
-  { name: "金色", max: 131, exp_per: 200, color: "#FF8F00" },
-]
+// ==========================================
+// 1. 静态配置
+// ==========================================
+const QUALITIES = [
+  { name: "白色", max: 35,  exp: 20,  color: "#9ca3af" }, 
+  { name: "绿色", max: 36,  exp: 40,  color: "#16a34a" }, 
+  { name: "蓝色", max: 89,  exp: 50,  color: "#2563eb" }, 
+  { name: "紫色", max: 176, exp: 100, color: "#9333ea" }, 
+  { name: "金色", max: 137, exp: 200, color: "#d97706" }, 
+];
 
-const MAX_TOTAL_CAPACITY = qualities.reduce((sum, q) => sum + q.max, 0)
+// --- 核心限制常量 ---
+const MAX_COUNT_CAP = 473;      // 数量最大值
+const MAX_FIRST_EXP_CAP = 51590; // 【修正】首次获得经验的硬上限 (固定)
+const TASK_BONUS_EXP = 1430;    // 任务奖励值
+const MAX_MODULE_EXP = 53020;   // 模块总上限 (51590 + 1430)
 
-// --- 2. 响应式状态 ---
-const inputCount = ref('')
-const inputExp = ref('')
-
-const resultStatus = reactive({
-  success: false,
-  message: '等待输入...',
-  totalCount: 0,
-  totalExp: 0
-})
-
-const distribution = ref(qualities.map(q => ({ ...q, count: 0, currentExp: 0 })))
-
-// --- 3. 数据加载与互通逻辑 ---
-onMounted(() => {
-  // 1. 优先读取自己的数据 (wedge_calc)
-  const wedgeData = getModule('wedge_calc');
-  
-  if (wedgeData) {
-    if (wedgeData.count) inputCount.value = wedgeData.count;
-    if (wedgeData.exp) inputExp.value = wedgeData.exp;
+// ==========================================
+// 2. 算法核心 (分布推导)
+// ==========================================
+const solveDistribution = (targetCount, targetExp) => {
+  if (targetCount <= 0 || targetExp <= 0) {
+    return QUALITIES.map(q => ({ ...q, count: 0, totalExp: 0 }));
   }
 
-  // // 2. 互通逻辑：如果没有填入经验，尝试从“经验计算器”读取总经验
-  // // 这样用户在另一页算完等级后，过来可以直接算楔子分配
-  // if (!inputExp.value) {
-  //   const expData = getModule('exp_calc');
-  //   if (expData && expData.totalExp) {
-  //     inputExp.value = expData.totalExp;
-  //   }
-  // }
+  let bestCounts = Array(QUALITIES.length).fill(0);
+  let minDiff = Infinity;
 
-  // 3. 如果有数据，自动触发一次计算
-  if (inputCount.value && inputExp.value) {
-    runCalculation();
+  const randint = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+  const shuffle = (arr) => {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  };
+
+  const initRandom = () => {
+    const counts = Array(QUALITIES.length).fill(0);
+    let rem = targetCount;
+    const indices = shuffle([...Array(QUALITIES.length).keys()]);
+    for (const i of indices) {
+      const maxCanFill = Math.min(rem, QUALITIES[i].max);
+      let fill = 0;
+      if (maxCanFill > 0) fill = randint(0, maxCanFill);
+      counts[i] = fill;
+      rem -= fill;
+    }
+    if (rem > 0) {
+      for (let i = 0; i < QUALITIES.length; i++) {
+        const space = QUALITIES[i].max - counts[i];
+        const add = Math.min(rem, space);
+        counts[i] += add;
+        rem -= add;
+        if (rem === 0) break;
+      }
+    }
+    return counts;
+  };
+
+  const optimize = (startCounts) => {
+    let currentCounts = [...startCounts];
+    for (let step = 0; step < 200; step++) {
+      const currentExp = currentCounts.reduce((acc, c, i) => acc + c * QUALITIES[i].exp, 0);
+      const diff = targetExp - currentExp;
+      if (diff === 0) return { counts: currentCounts, diff: 0 };
+
+      let bestMove = null;
+      let bestNewDiffAbs = Math.abs(diff);
+
+      if (diff > 0) { 
+        for (let i = 0; i < QUALITIES.length; i++) {
+          if (currentCounts[i] <= 0) continue;
+          for (let j = i + 1; j < QUALITIES.length; j++) {
+            if (currentCounts[j] >= QUALITIES[j].max) continue;
+            const delta = QUALITIES[j].exp - QUALITIES[i].exp;
+            const newDiffAbs = Math.abs(diff - delta);
+            if (newDiffAbs < bestNewDiffAbs) {
+              bestNewDiffAbs = newDiffAbs;
+              bestMove = [i, j]; 
+            }
+          }
+        }
+      } else { 
+        for (let i = QUALITIES.length - 1; i >= 0; i--) {
+          if (currentCounts[i] <= 0) continue;
+          for (let j = 0; j < i; j++) {
+            if (currentCounts[j] >= QUALITIES[j].max) continue;
+            const delta = QUALITIES[j].exp - QUALITIES[i].exp;
+            const newDiffAbs = Math.abs(diff - delta);
+            if (newDiffAbs < bestNewDiffAbs) {
+              bestNewDiffAbs = newDiffAbs;
+              bestMove = [i, j]; 
+            }
+          }
+        }
+      }
+      if (!bestMove) break;
+      const [src, dst] = bestMove;
+      currentCounts[src]--;
+      currentCounts[dst]++;
+    }
+    const finalExp = currentCounts.reduce((acc, c, i) => acc + c * QUALITIES[i].exp, 0);
+    return { counts: currentCounts, diff: targetExp - finalExp };
+  };
+
+  for (let k = 0; k < 50; k++) {
+    const start = initRandom();
+    const res = optimize(start);
+    if (Math.abs(res.diff) < Math.abs(minDiff)) {
+      minDiff = res.diff;
+      bestCounts = res.counts;
+      if (minDiff === 0) break;
+    }
   }
+
+  return QUALITIES.map((q, idx) => ({
+    ...q,
+    count: bestCounts[idx],
+    totalExp: bestCounts[idx] * q.exp
+  }));
+};
+
+// ==========================================
+// 3. 状态管理
+// ==========================================
+const inputs = reactive({
+  firstCount: 0,
+  firstExp: 0,
+  isTaskDone: false
 });
 
-// --- 4. 算法移植 (保持不变) ---
-const clone = (arr) => [...arr]
-const randint = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min
+// UI 状态
+const distribution = ref([]);
+const calcDiff = ref(0);
+const errorMsg = reactive({ count: '', exp: '' });
 
-const shuffle = (array) => {
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
-  }
-  return array
-}
+// ==========================================
+// 4. 输入拦截与清洗
+// ==========================================
+const sanitizeInput = (targetObj, key) => {
+  let val = parseInt(targetObj[key]);
+  if (isNaN(val) || val < 0) val = 0;
 
-const initGreedyBottomUp = (targetCount) => {
-  const counts = new Array(qualities.length).fill(0)
-  let rem = targetCount
-  for (let i = 0; i < qualities.length; i++) {
-    const fill = Math.min(rem, qualities[i].max)
-    counts[i] = fill
-    rem -= fill
-  }
-  return rem === 0 ? counts : null
-}
-
-const initGreedyTopDown = (targetCount) => {
-  const counts = new Array(qualities.length).fill(0)
-  let rem = targetCount
-  for (let i = qualities.length - 1; i >= 0; i--) {
-    const fill = Math.min(rem, qualities[i].max)
-    counts[i] = fill
-    rem -= fill
-  }
-  return rem === 0 ? counts : null
-}
-
-const initRandom = (targetCount) => {
-  const counts = new Array(qualities.length).fill(0)
-  let rem = targetCount
-  const indices = shuffle([...Array(qualities.length).keys()])
-  for (const i of indices) {
-    const maxCanFill = Math.min(rem, qualities[i].max)
-    let fill = 0
-    if (maxCanFill > 0) fill = randint(0, maxCanFill)
-    counts[i] = fill
-    rem -= fill
-  }
-  if (rem > 0) {
-    for (let i = 0; i < qualities.length; i++) {
-      const space = qualities[i].max - counts[i]
-      const add = Math.min(rem, space)
-      counts[i] += add
-      rem -= add
-      if (rem === 0) break
-    }
-  }
-  return counts
-}
-
-const optimizeCounts = (startCounts, targetExp) => {
-  let currentCounts = [...startCounts]
-  const maxSteps = 100
-  for (let step = 0; step < maxSteps; step++) {
-    const currentExp = currentCounts.reduce((acc, c, i) => acc + c * qualities[i].exp_per, 0)
-    const diff = targetExp - currentExp
-    if (diff === 0) return { counts: currentCounts, diff: 0 }
-    
-    let bestMove = null
-    let bestNewDiffAbs = Math.abs(diff)
-    
-    if (diff > 0) { 
-      for (let i = 0; i < qualities.length; i++) {
-        if (currentCounts[i] <= 0) continue
-        for (let j = i + 1; j < qualities.length; j++) {
-          if (currentCounts[j] >= qualities[j].max) continue
-          const delta = qualities[j].exp_per - qualities[i].exp_per
-          const newDiffAbs = Math.abs(diff - delta)
-          if (newDiffAbs < bestNewDiffAbs) {
-            bestNewDiffAbs = newDiffAbs
-            bestMove = [i, j]
-          }
-        }
-      }
-    } else { 
-      for (let i = qualities.length - 1; i >= 0; i--) {
-        if (currentCounts[i] <= 0) continue
-        for (let j = 0; j < i; j++) {
-          if (currentCounts[j] >= qualities[j].max) continue
-          const delta = qualities[j].exp_per - qualities[i].exp_per 
-          const newDiffAbs = Math.abs(diff - delta)
-          if (newDiffAbs < bestNewDiffAbs) {
-            bestNewDiffAbs = newDiffAbs
-            bestMove = [i, j]
-          }
-        }
-      }
-    }
-    if (!bestMove) break
-    const [src, dst] = bestMove
-    currentCounts[src]--
-    currentCounts[dst]++
-  }
-  const finalExp = currentCounts.reduce((acc, c, i) => acc + c * qualities[i].exp_per, 0)
-  return { counts: currentCounts, diff: targetExp - finalExp }
-}
-
-const getExpRange = (count) => {
-  const cMin = initGreedyBottomUp(count)
-  const cMax = initGreedyTopDown(count)
-  if (!cMin || !cMax) return [0, 0]
-  const expMin = cMin.reduce((acc, c, i) => acc + c * qualities[i].exp_per, 0)
-  const expMax = cMax.reduce((acc, c, i) => acc + c * qualities[i].exp_per, 0)
-  return [expMin, expMax]
-}
-
-const runCalculation = () => {
-  const tCount = parseInt(inputCount.value)
-  const tExp = parseInt(inputExp.value)
+  // --- 拦截逻辑 ---
   
-  if (isNaN(tCount) || isNaN(tExp) || tCount <= 0 || tExp <= 0) {
-    resultStatus.message = "等待输入有效数字..."
-    resultStatus.success = false
-    resultStatus.totalCount = 0
-    resultStatus.totalExp = 0
-    distribution.value.forEach(d => { d.count = 0; d.currentExp = 0 })
-    return
-  }
-
-  if (tCount > MAX_TOTAL_CAPACITY) {
-    resultStatus.message = `数量 ${tCount} 超过仓库上限 ${MAX_TOTAL_CAPACITY}`
-    resultStatus.success = false
-    return
-  }
-  
-  const [minExp, maxExp] = getExpRange(tCount)
-  if (tExp < minExp) {
-    resultStatus.message = `目标经验过低 (至少需要 ${minExp})`
-    resultStatus.success = false
-    return
-  }
-  if (tExp > maxExp) {
-    resultStatus.message = `目标经验过高 (至多只能 ${maxExp})`
-    resultStatus.success = false
-    return
-  }
-
-  let bestCounts = null
-  let minDiff = Infinity
-  const startPoints = []
-  
-  const p1 = initGreedyBottomUp(tCount)
-  if (p1) startPoints.push(p1)
-  const p2 = initGreedyTopDown(tCount)
-  if (p2) startPoints.push(p2)
-  for (let i = 0; i < 500; i++) {
-    startPoints.push(initRandom(tCount))
-  }
-  
-  for (const counts of startPoints) {
-    const { counts: optCounts, diff } = optimizeCounts(counts, tExp)
-    if (diff === 0) {
-      bestCounts = optCounts
-      minDiff = 0
-      break 
-    }
-    if (Math.abs(diff) < Math.abs(minDiff)) {
-      minDiff = diff
-      bestCounts = optCounts
-    }
-  }
-  
-  if (bestCounts) {
-    let sumC = 0
-    let sumE = 0
-    bestCounts.forEach((c, idx) => {
-      distribution.value[idx].count = c
-      distribution.value[idx].currentExp = c * qualities[idx].exp_per
-      sumC += c
-      sumE += c * qualities[idx].exp_per
-    })
-    
-    resultStatus.totalCount = sumC
-    resultStatus.totalExp = sumE
-    
-    if (minDiff === 0) {
-      resultStatus.success = true
-      resultStatus.message = "预估完成 仅供参考"
+  // 1. 数量拦截
+  if (key === 'firstCount') {
+    if (val > MAX_COUNT_CAP) {
+      val = MAX_COUNT_CAP;
+      errorMsg.count = `数量已达上限 ${MAX_COUNT_CAP}`;
     } else {
-      resultStatus.success = false
-      resultStatus.message = `无精确解 (误差 ${minDiff} exp)`
+      errorMsg.count = '';
     }
   }
-}
 
-// --- 5. 监听与保存逻辑 ---
-watch([inputCount, inputExp], () => {
-  // 1. 每次变化都计算
-  runCalculation();
+  // 2. 经验拦截 (固定死 51590)
+  if (key === 'firstExp') {
+    if (val > MAX_FIRST_EXP_CAP) {
+      val = MAX_FIRST_EXP_CAP;
+      errorMsg.exp = `首次获得经验上限为 ${MAX_FIRST_EXP_CAP}`;
+    } else {
+      errorMsg.exp = '';
+    }
+  }
 
-  // 2. 每次变化都保存到 wedge_calc 模块
-  updateModule('wedge_calc', {
-    count: inputCount.value,
-    exp: inputExp.value
-  });
+  targetObj[key] = val;
+};
+
+// ==========================================
+// 5. 业务逻辑
+// ==========================================
+
+// 监听输入触发计算
+watch(() => [inputs.firstCount, inputs.firstExp], ([count, exp]) => {
+  if (count > 0 && exp > 0) {
+    const res = solveDistribution(count, exp);
+    distribution.value = res;
+    const calcExp = res.reduce((sum, item) => sum + item.totalExp, 0);
+    calcDiff.value = exp - calcExp;
+  } else {
+    distribution.value = QUALITIES.map(q => ({ ...q, count: 0, totalExp: 0 }));
+    calcDiff.value = 0;
+  }
 });
 
-// --- 6. 输入处理 ---
-const handleinputCount = (e) => {
-  let value = e.target.value
-  value = value.replace(/[^\d]/g, '')
-  if (value !== '') {
-    if (parseInt(value) > 464) value = '464'
-    value = String(parseInt(value))
-  }
-  inputCount.value = value
-  e.target.value = value
-}
+// 仪表盘数据
+const dashboard = computed(() => {
+  const currentTotal = inputs.firstExp + (inputs.isTaskDone ? TASK_BONUS_EXP : 0);
+  return {
+    curr: currentTotal,
+    max: MAX_MODULE_EXP,
+    pct: MAX_MODULE_EXP ? (currentTotal / MAX_MODULE_EXP) * 100 : 0
+  };
+});
 
-const handleinputExp = (e) => {
-  let value = e.target.value
-  value = value.replace(/[^\d]/g, '')
-  if (value !== '') {
-    if (parseInt(value) > 50090) value = '50090' 
-    value = String(parseInt(value))
+// ==========================================
+// 6. 存储逻辑
+// ==========================================
+const saveData = () => {
+  updateModule('wedge_calc', {
+    count: inputs.firstCount,
+    exp: inputs.firstExp,
+    isTaskCompleted: inputs.isTaskDone,
+    totalExp: dashboard.value.curr
+  });
+};
+
+watch(inputs, () => saveData(), { deep: true });
+
+onMounted(() => {
+  const saved = getModule('wedge_calc');
+  if (saved) {
+    if (saved.count !== undefined) inputs.firstCount = saved.count;
+    if (saved.exp !== undefined) inputs.firstExp = saved.exp;
+    if (saved.isTaskCompleted !== undefined) inputs.isTaskDone = saved.isTaskCompleted;
   }
-  inputExp.value = value
-  e.target.value = value
-}
+});
 </script>
 
 <template>
-  <div class="page-container">
-    <div class="calculator-card">
-      
-      <div class="header-info">
-        Version: v1.0.8 Web | Author: 皎皎角wiki组 (Ported)
-      </div>
-
-      <fieldset class="group-box">
-        <legend>基础数据输入</legend>
-        <div class="input-grid">
-          <label>首次获得的魔之楔数量:</label>
-          <input 
-            type="number" 
-            :value="inputCount"
-            @input="handleinputCount"
-            placeholder="总数"
-          />
-          
-          <label>首次获得魔之楔的总经验:</label>
-          <input 
-            type="number" 
-            :value="inputExp"
-            @input="handleinputExp"
-            placeholder="总经验"
-          />
+  <div class="light-theme-container">
+    
+    <div class="dashboard-panel">
+      <div class="main-stat-card">
+        <div class="stat-header">
+          <span class="stat-title">魔之楔培养总进度</span>
+          <span class="stat-value">
+            {{ dashboard.curr }} <small>/ {{ dashboard.max }}</small>
+          </span>
         </div>
-      </fieldset>
+        <div class="progress-track main-track">
+          <div class="progress-bar main-bar" :style="{ width: dashboard.pct + '%' }"></div>
+        </div>
+        <div class="stat-subtext">
+          结构: 首次获得 {{ inputs.firstExp }} + 任务 {{ inputs.isTaskDone ? TASK_BONUS_EXP : 0 }}
+        </div>
+      </div>
+    </div>
 
-      <fieldset class="group-box">
-        <legend>各品质分配详情[推测]</legend>
-        
-        <div class="result-list">
-          <div v-for="item in distribution" :key="item.name" class="result-row">
-            <span class="row-label">{{ item.name }} (单个{{ item.exp_per }} exp):</span>
-            <div class="row-value-box" :style="{ color: item.count > 0 ? item.color : '#ccc' }">
-              {{ item.count }} 个 <span class="sub-text">(共 {{ item.currentExp }} exp)</span>
-            </div>
+    <div class="input-groups">
+      
+      <div class="group-panel compact-panel">
+        <div class="compact-header">
+          <span class="group-title">1. 首次获得数据录入</span>
+        </div>
+        <div class="compact-content">
+          
+          <div class="task-row">
+            <label class="task-check">
+              <input type="checkbox" v-model="inputs.isTaskDone" class="hidden-check">
+              <span class="custom-check">
+                <svg viewBox="0 0 24 24" class="icon"><polyline points="20 6 9 17 4 12"></polyline></svg>
+              </span>
+              <span class="task-label">已完成魔之楔任务 (+{{ TASK_BONUS_EXP }} exp)</span>
+            </label>
           </div>
 
           <div class="divider"></div>
 
-          <div class="result-row total-row">
-            <span class="row-label bold">合计 (验算):</span>
+          <div class="compact-grid-2">
+            
+            <div class="compact-item-wrapper">
+              <div class="compact-item" :class="{ 'has-error': errorMsg.count }">
+                <span class="item-label">首次获得数量</span>
+                <input 
+                  type="number" 
+                  v-model.number="inputs.firstCount" 
+                  @input="sanitizeInput(inputs, 'firstCount')"
+                  class="compact-input" 
+                  placeholder="0"
+                >
+              </div>
+              <div class="error-tip" v-if="errorMsg.count">{{ errorMsg.count }}</div>
+            </div>
+
+            <div class="compact-item-wrapper">
+              <div class="compact-item" :class="{ 'has-error': errorMsg.exp }">
+                <span class="item-label">首次获得总经验</span>
+                <input 
+                  type="number" 
+                  v-model.number="inputs.firstExp" 
+                  @input="sanitizeInput(inputs, 'firstExp')"
+                  class="compact-input" 
+                  placeholder="0"
+                >
+              </div>
+              <div class="error-tip" v-if="errorMsg.exp">{{ errorMsg.exp }}</div>
+            </div>
+
+          </div>
+
+        </div>
+      </div>
+
+      <div class="group-panel compact-panel">
+        <div class="compact-header">
+          <span class="group-title">2. 首次获得分布预估</span>
+          <span class="guess-tag">自动推导猜测</span>
+        </div>
+        <div class="compact-content">
+          
+          <div class="dist-list" v-if="inputs.firstCount > 0">
             <div 
-              class="row-value-box total-box"
-              :class="{ 'success-bg': resultStatus.success, 'fail-bg': !resultStatus.success && resultStatus.totalCount > 0 }"
+              v-for="item in distribution" 
+              :key="item.name" 
+              class="dist-row"
+              :class="{ 'zero': item.count === 0 }"
             >
-              {{ resultStatus.totalCount }} 个 / {{ resultStatus.totalExp }} exp
+              <div class="dist-left">
+                <span class="color-dot" :style="{ backgroundColor: item.color }"></span>
+                <span class="dist-name">{{ item.name }}</span>
+                <span class="dist-per">(Max:{{ item.max }})</span>
+              </div>
+              <div class="dist-right">
+                <span class="dist-val">{{ item.count }}</span> 个
+              </div>
             </div>
           </div>
-        </div>
-      </fieldset>
+          
+          <div v-else class="empty-tip">
+            等待输入数据...
+          </div>
 
-      <div class="status-bar" :class="{ 'status-ok': resultStatus.success, 'status-fail': !resultStatus.success }">
-        <span v-if="resultStatus.success">✅ {{ resultStatus.message }}</span>
-        <span v-else>
-          <template v-if="resultStatus.message !== '等待输入...'">⚠️</template> 
-          {{ resultStatus.message }}
-        </span>
+          <div class="calc-diff" v-if="inputs.firstCount > 0 && calcDiff !== 0">
+            ⚠ 无法精确匹配，误差: {{ calcDiff }} exp
+          </div>
+
+        </div>
       </div>
 
     </div>
@@ -348,229 +338,63 @@ const handleinputExp = (e) => {
 </template>
 
 <style scoped>
-/* =========================================
-   1. 桌面端默认样式 (保持你原有的逻辑不变)
-   ========================================= */
+/* 基础样式 */
+.light-theme-container { font-family: "Inter", sans-serif; color: #333; padding-bottom: 50px; }
 
-/* 容器布局 */
-.page-container {
-  display: flex;
-  justify-content: center;
-  padding: 20px;
-  font-family: "Microsoft YaHei UI", sans-serif;
-  color: #333;
-}
+/* 仪表盘 */
+.dashboard-panel { background: #fff; border-radius: 12px; padding: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.05); margin-bottom: 20px; }
+.main-stat-card { margin-bottom: 0; }
+.stat-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+.stat-title { font-weight: 600; font-size: 16px; color: #1f2937; }
+.stat-value { font-family: "JetBrains Mono", monospace; font-size: 24px; font-weight: 700; color: #111827; }
+.stat-value small { font-size: 14px; color: #9ca3af; font-weight: 400; }
+.stat-subtext { font-size: 11px; color: #6b7280; margin-top: 6px; text-align: right; }
+.progress-track { background: #eef2f7; height: 12px; border-radius: 6px; overflow: hidden; }
+.main-bar { height: 100%; background: linear-gradient(90deg, #f97316 0%, #ea580c 100%); transition: width 0.4s ease; }
 
-.calculator-card {
-  width: 100%;
-  max-width: 450px;
-  background: #fff;
-  padding: 10px;
-  border-radius: 4px;
-}
+/* 面板通用 */
+.compact-panel { background: #fff; border-radius: 8px; border: 1px solid #e5e7eb; margin-bottom: 12px; overflow: hidden; }
+.compact-header { background: #f9fafb; padding: 10px 14px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
+.group-title { font-weight: 600; font-size: 13px; color: #374151; }
+.guess-tag { font-size: 10px; background: #fff7ed; color: #c2410c; padding: 2px 6px; border-radius: 4px; border: 1px solid #fed7aa; }
+.compact-content { padding: 14px; }
 
-.header-info {
-  text-align: center;
-  font-size: 10px;
-  color: #888;
-  margin-bottom: 10px;
-}
+/* 任务勾选 */
+.task-row { margin-bottom: 12px; display: flex; align-items: center; }
+.task-check { display: flex; align-items: center; cursor: pointer; user-select: none; }
+.hidden-check { display: none; }
+.custom-check { width: 18px; height: 18px; border: 2px solid #d1d5db; border-radius: 4px; margin-right: 8px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; background: #fff; }
+.hidden-check:checked + .custom-check { background: #f97316; border-color: #f97316; }
+.icon { width: 12px; height: 12px; stroke: white; stroke-width: 3; fill: none; opacity: 0; }
+.hidden-check:checked + .custom-check .icon { opacity: 1; }
+.task-label { font-size: 14px; font-weight: 600; color: #374151; }
 
-.group-box {
-  border: 1px solid #dcdcdc;
-  border-radius: 4px;
-  padding: 15px;
-  margin-bottom: 15px;
-}
+.divider { height: 1px; background: #f0f0f0; margin: 12px 0; }
 
-legend {
-  font-size: 14px;
-  color: #333;
-  padding: 0 5px;
-  font-weight: bold;
-}
+/* 输入区 (Grid & Error Handling) */
+.compact-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.compact-item-wrapper { display: flex; flex-direction: column; }
+.compact-item { display: flex; align-items: center; background: #fdfdfd; border: 1px solid #eee; border-radius: 6px; padding: 8px 12px; transition: border-color 0.2s; }
+.compact-item.has-error { border-color: #fca5a5; background: #fef2f2; }
+.item-label { font-size: 12px; color: #6b7280; margin-right: 8px; white-space: nowrap; }
+.compact-input { flex: 1; width: 100%; border: none; background: transparent; font-size: 15px; text-align: right; font-family: "JetBrains Mono"; outline: none; font-weight: 600; color: #111827; }
+.error-tip { font-size: 10px; color: #ef4444; margin-top: 4px; text-align: right; }
 
-/* 输入网格 (桌面: 左右排列) */
-.input-grid {
-  display: grid;
-  grid-template-columns: auto 1fr; /* 左侧自适应，右侧撑满 */
-  gap: 10px 15px;
-  align-items: center;
-}
+/* 分布列表 */
+.dist-list { display: flex; flex-direction: column; gap: 6px; }
+.dist-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px dashed #f3f4f6; }
+.dist-row:last-child { border-bottom: none; }
+.dist-row.zero { opacity: 0.4; }
+.dist-left { display: flex; align-items: center; gap: 6px; }
+.color-dot { width: 8px; height: 8px; border-radius: 50%; }
+.dist-name { font-size: 13px; font-weight: 500; color: #374151; }
+.dist-per { font-size: 12px; color: #9ca3af; }
+.dist-val { font-family: "JetBrains Mono"; font-weight: 700; color: #111827; margin-right: 2px; }
+.dist-right { font-size: 12px; color: #6b7280; }
+.empty-tip { text-align: center; color: #d1d5db; font-size: 12px; font-style: italic; padding: 10px; }
+.calc-diff { font-size: 11px; text-align: right; color: #ef4444; margin-top: 8px; font-family: monospace; background: #fef2f2; padding: 4px 8px; border-radius: 4px; }
 
-.input-grid label {
-  text-align: right;
-  font-size: 14px;
-}
-
-input {
-  padding: 5px;
-  border: 1px solid #ccc;
-  border-radius: 2px;
-  outline: none;
-  /* 桌面端字体可以小一点 */
-  font-size: 14px; 
-}
-input:focus {
-  border-color: #1565C0;
-}
-
-.result-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-/* 结果行 (桌面: 左右排列，左侧固定140px) */
-.result-row {
-  display: grid;
-  grid-template-columns: 140px 1fr; 
-  align-items: center;
-  gap: 10px;
-}
-
-.row-label {
-  text-align: right;
-  font-size: 13px;
-}
-.row-label.bold {
-  font-weight: bold;
-}
-
-.row-value-box {
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  padding: 6px;
-  background-color: #f9f9f9;
-  text-align: center;
-  font-weight: bold;
-  font-size: 13px;
-}
-
-.sub-text {
-  font-weight: normal;
-  font-size: 12px;
-  margin-left: 5px;
-  opacity: 0.8;
-}
-
-.divider {
-  height: 1px;
-  background: #eee;
-  border-bottom: 1px solid #fff;
-  box-shadow: 0 1px 0 #ddd inset;
-  margin: 5px 0;
-}
-
-.total-box {
-  background-color: #f0f0f0;
-  color: #000;
-  border-style: double;
-}
-
-.success-bg {
-  background-color: #E8F5E9;
-  color: #2E7D32;
-  border-color: #388E3C;
-}
-
-.fail-bg {
-  background-color: #FFEBEE;
-  color: #C62828;
-  border-color: #d32f2f;
-}
-
-.status-bar {
-  text-align: center;
-  font-style: italic;
-  font-size: 14px;
-  margin-top: 5px;
-  color: #666;
-}
-
-.status-ok {
-  color: #388E3C;
-  font-weight: bold;
-  font-style: normal;
-}
-
-.status-fail {
-  color: #d32f2f;
-  font-weight: bold;
-  font-style: normal;
-}
-
-/* =========================================
-   📱 2. 移动端竖屏适配 (新增核心代码)
-   ========================================= */
 @media (max-width: 600px) {
-  /* 1. 减少容器边距，争取更多空间 */
-  .page-container {
-    padding: 10px;
-  }
-  
-  .calculator-card {
-    padding: 0; /* 卡片内边距清零，由 group-box 提供间距 */
-    background: transparent; /* 手机上可以去掉卡片背景，直接融为一体 */
-  }
-
-  /* 2. GroupBox 调整 */
-  .group-box {
-    padding: 12px; /* 稍微紧凑一点 */
-    background: #fff; /* 确保内容有背景 */
-  }
-
-  /* 3. 输入区域：改为上下堆叠 */
-  .input-grid {
-    grid-template-columns: 1fr; /* 强制单列 */
-    gap: 5px; /* 减小间距 */
-  }
-
-  .input-grid label {
-    text-align: left; /* 标签改为左对齐 */
-    margin-top: 5px;
-    font-weight: bold;
-    color: #555;
-  }
-
-  input {
-    padding: 10px; /* 增大点击区域 */
-    font-size: 16px; /* 关键：iOS上字体小于16px点击时会强制放大页面，设为16px可防止 */
-  }
-
-  /* 4. 结果区域：改为上下堆叠 */
-  .result-row {
-    grid-template-columns: 1fr; /* 强制单列 */
-    gap: 4px;
-    margin-bottom: 8px; /* 增加行间距 */
-  }
-
-  .row-label {
-    text-align: left; /* 标签左对齐 */
-    font-size: 12px;
-    color: #666;
-  }
-
-  /* 5. 数值框样式优化 */
-  .row-value-box {
-    padding: 10px; /* 增加高度 */
-    display: flex; /* 使用 flex 让内部文字更好排版 */
-    justify-content: space-between; /* 数量和经验值两端对齐 (可选) */
-    align-items: center;
-  }
-
-  .sub-text {
-    font-size: 12px;
-    /* 手机上字号小一点，或者让它换行 */
-  }
-  
-  /* 6. 合计行特殊处理 */
-  .total-row {
-    margin-top: 10px;
-  }
-  .total-row .row-label {
-    font-size: 14px;
-    color: #333;
-  }
+  .compact-grid-2 { grid-template-columns: 1fr; }
 }
 </style>

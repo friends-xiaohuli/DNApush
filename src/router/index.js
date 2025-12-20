@@ -8,6 +8,10 @@ import about from '../views/about.vue'
 import ExpCalculator from '../views/ExpCalculator.vue'
 import instanceInfo from '../views/instanceInfo.vue'
 import role from '../views/role.vue'
+import weapon from '../views/weapon.vue'
+import spirit from '../views/spirit.vue'
+import other from '../views/other.vue'
+import DataImportOCR from '../views/DataImportOCR.vue'
 
 
 const routes = [
@@ -19,6 +23,10 @@ const routes = [
   { path: '/instanceInfo', component: instanceInfo },
   { path: '/about', component: about },
   { path: '/role', component: role },
+  { path: '/weapon', component: weapon },
+  { path: '/spirit', component: spirit },
+  { path: '/other', component: other },
+  { path: '/DataImportOCR', component: DataImportOCR },
 ]
 
 export default createRouter({
