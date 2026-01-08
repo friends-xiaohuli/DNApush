@@ -124,9 +124,9 @@ const remainingTime = ref(0);
 let timerInterval = null;
 
 const CACHE_KEY = 'DNA_MONITOR_CACHE_V2';
-const CACHE_DURATION = 60 * 1000; 
+const CACHE_DURATION = 60 * 1000; // 60秒冷却
 
-// --- 修改点：定义固定的分组名称 ---
+// --- 分组名称定义 ---
 const GROUP_NAMES = ['角色', '武器', '魔之楔'];
 const getGroupName = (index) => {
   return GROUP_NAMES[index] || `区域 ${index + 1}`;
@@ -138,31 +138,81 @@ const totalInstanceCount = computed(() => {
   return instanceGroups.value.reduce((acc, group) => acc + (group.instances ? group.instances.length : 0), 0);
 });
 
-// --- 初始化 ---
+// --- 生命周期 ---
 onMounted(() => {
-  loadData();
+  // 1. 页面初始化：强制刷新一次 (获取最新数据)
+  // 如果你希望 F5 刷新也保持冷却，把 true 改为 false
+  loadData(true); 
+
+  // 2. 添加监听器：处理切屏、切后台、失焦后返回
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  window.addEventListener('focus', handleWindowFocus);
 });
 
 onUnmounted(() => {
   if (timerInterval) clearInterval(timerInterval);
+  // 移除监听器，防止内存泄漏
+  document.removeEventListener('visibilitychange', handleVisibilityChange);
+  window.removeEventListener('focus', handleWindowFocus);
 });
+
+// --- 核心：智能刷新逻辑 ---
+// 场景：手机切后台回来、浏览器切标签回来
+const handleVisibilityChange = () => {
+  if (document.visibilityState === 'visible') {
+    trySmartRefresh();
+  }
+};
+
+// 场景：电脑窗口失焦(点其他软件)后点回来
+const handleWindowFocus = () => {
+  trySmartRefresh();
+};
+
+// 尝试刷新：仅在冷却结束后才发起请求
+const trySmartRefresh = () => {
+  // 如果正在加载，或者还在冷却倒计时中，不进行请求
+  if (loading.value || remainingTime.value > 0) {
+    // 这里可以加一个逻辑：虽然不请求，但校验一下本地倒计时是否准确
+    // (例如用户切走很久，回来时倒计时早该结束了)
+    const cached = localStorage.getItem(CACHE_KEY);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      const passed = Date.now() - parsed.timestamp;
+      // 如果实际时间已经超过了冷却时间，强制刷新
+      if (passed >= CACHE_DURATION) {
+        loadData(true);
+      }
+    }
+    return; 
+  }
+  // 冷却已结束，发起刷新
+  loadData(true);
+};
 
 // --- 数据加载 ---
 const loadData = async (forceRefresh = false) => {
   const cached = localStorage.getItem(CACHE_KEY);
   const now = Date.now();
 
+  // 如果不是强制刷新，且有缓存，且缓存未过期 -> 使用缓存
   if (cached && !forceRefresh) {
     try {
       const parsed = JSON.parse(cached);
+      // 检查缓存是否在有效期内
       if (now - parsed.timestamp < CACHE_DURATION) {
         currentStatus.value = parsed.currentStatus;
         instanceGroups.value = parsed.instanceGroups;
+        // 恢复倒计时
         startCooldown(parsed.timestamp);
         return;
       }
-    } catch (e) {}
+    } catch (e) {
+      // 缓存解析失败，继续执行 fetchData
+    }
   }
+  
+  // 否则 -> 发起网络请求
   await fetchData();
 };
 
@@ -182,13 +232,13 @@ const fetchData = async () => {
 
     if (statusResult.code !== 0 || infoResult.code !== 0) throw new Error('接口数据异常');
 
-
+    // 使用本地时间修正 updated 字段
     statusResult.data.updated = Math.floor(Date.now() / 1000);
-
 
     currentStatus.value = statusResult.data;
     instanceGroups.value = infoResult.data;
 
+    // 存入缓存并开始冷却
     const timestamp = Date.now();
     localStorage.setItem(CACHE_KEY, JSON.stringify({
       timestamp,
@@ -206,22 +256,31 @@ const fetchData = async () => {
 };
 
 const handleRefresh = () => {
+  // 手动点击按钮，必须等待冷却结束
   if (remainingTime.value > 0) return;
   loadData(true);
 };
 
 const startCooldown = (ts) => {
   if (timerInterval) clearInterval(timerInterval);
+  
   const update = () => {
-    const left = Math.ceil((CACHE_DURATION - (Date.now() - ts)) / 1000);
-    remainingTime.value = left > 0 ? left : 0;
-    if (left <= 0) clearInterval(timerInterval);
+    const passed = Date.now() - ts;
+    const left = Math.ceil((CACHE_DURATION - passed) / 1000);
+    
+    if (left <= 0) {
+      remainingTime.value = 0;
+      clearInterval(timerInterval);
+    } else {
+      remainingTime.value = left;
+    }
   };
-  update();
+  
+  update(); // 立即执行一次
   timerInterval = setInterval(update, 1000);
 };
 
-// --- 样式匹配逻辑 (多彩浅色系) ---
+// --- 样式匹配逻辑 ---
 const matchType = (name, keywords) => keywords.some(k => name.includes(k));
 
 const getColorTheme = (name) => {
@@ -233,7 +292,7 @@ const getColorTheme = (name) => {
   if (matchType(name, ['驱逐'])) return 'theme-purple';    
   if (matchType(name, ['追缉'])) return 'theme-pink';
   if (matchType(name, ['拆解'])) return 'theme-gold';
-  return 'theme-gray';                                          
+  return 'theme-gray';                                  
 };
 
 // --- 时间格式化 ---
